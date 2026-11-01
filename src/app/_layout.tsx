@@ -14,8 +14,12 @@ import { config, loadApiUrlOverride } from '@/lib/config';
 import { setAppTimeZone } from '@/lib/format';
 import { queryClient } from '@/lib/queryClient';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
+import { useWidgetSync } from '@/widget/useWidgetSync';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Deep links (e.g. the widget's "+" → neri://task/new) land on top of the tabs, so closing returns to the app
+export const unstable_settings = { anchor: '(tabs)' };
 
 export default function RootLayout() {
   const [configReady, setConfigReady] = useState(false);
@@ -47,6 +51,7 @@ export default function RootLayout() {
 function AppNavigator() {
   const { colors, scheme } = useTheme();
   const { status } = useSession();
+  useWidgetSync(status);
   const signedIn = status === 'signedIn';
   const profile = useProfile(signedIn);
   const serverSheet = useDisclosure();
