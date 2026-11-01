@@ -54,7 +54,7 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
 
   switch (widget.widget_type) {
     case 'weekday_breakdown': {
-      const rows = (data ?? []) as Array<{ day: string; done: number; eligible: number }>;
+      const rows = (data ?? []) as { day: string; done: number; eligible: number }[];
       return (
         <ChartCard title="Weekday breakdown" description="Which days of the week you consistently follow through.">
           <BarChart
@@ -81,7 +81,7 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
 
     case 'value_log': {
       const v = data ?? {};
-      const rows = (v.daily ?? []) as Array<{ date: string; label: string; value: number }>;
+      const rows = (v.daily ?? []) as { date: string; label: string; value: number }[];
       const unit = v.unit ? String(v.unit) : '';
       return (
         <ChartCard title={String(v.label ?? 'Logged')} description="Logged by you, no goal attached.">
@@ -113,14 +113,14 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
     }
 
     case 'period_progress': {
-      const rows = (data?.periods ?? []) as Array<{
+      const rows = (data?.periods ?? []) as {
         label: string;
         date: string;
         done: number;
         target: number;
         is_met: boolean;
         is_current: boolean;
-      }>;
+      }[];
       const unit = String(data?.unit ?? 'week');
       return (
         <ChartCard
@@ -158,15 +158,18 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
 
     case 'daily_trend': {
       // Running completion rate: done so far / eligible so far.
-      const rows = (data ?? []) as Array<{ date: string; label: string; is_eligible: boolean; is_done: boolean }>;
-      let elig = 0;
-      let done = 0;
-      const points = rows.map((r) => {
-        if (r.is_eligible) elig += 1;
-        if (r.is_done) done += 1;
-        return { ...r, done, elig, rate: elig > 0 ? Math.round((done / elig) * 1000) / 10 : 0 };
-      });
-      if (elig === 0) return null;
+      const rows = (data ?? []) as { date: string; label: string; is_eligible: boolean; is_done: boolean }[];
+      const points = rows.reduce<((typeof rows)[number] & { done: number; elig: number; rate: number })[]>(
+        (acc, r) => {
+          const prev = acc[acc.length - 1];
+          const elig = (prev?.elig ?? 0) + (r.is_eligible ? 1 : 0);
+          const done = (prev?.done ?? 0) + (r.is_done ? 1 : 0);
+          acc.push({ ...r, done, elig, rate: elig > 0 ? Math.round((done / elig) * 1000) / 10 : 0 });
+          return acc;
+        },
+        [],
+      );
+      if (points[points.length - 1]?.elig === 0 || points.length === 0) return null;
       return (
         <ChartCard title="Completion over time" description="Running completion rate across the period.">
           <LineChart
@@ -190,7 +193,7 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
       );
 
     case 'count_trend': {
-      const rows = (data ?? []) as Array<{ date: string; label: string; value: number; target: number }>;
+      const rows = (data ?? []) as { date: string; label: string; value: number; target: number }[];
       return (
         <ChartCard title="Daily volume vs. target" description="Recorded daily quantities against your target.">
           <LineChart
@@ -253,7 +256,7 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
     }
 
     case 'occurrences_bar': {
-      const rows = (data ?? []) as Array<{ date: string; label: string; occurrences: number }>;
+      const rows = (data ?? []) as { date: string; label: string; occurrences: number }[];
       return (
         <ChartCard title="Occurrences over time" description="Aim for zero. Clean days have no bar.">
           <BarChart
@@ -284,7 +287,7 @@ const fmtNum = (v: unknown) => {
 };
 
 /** Compact row of 2–4 label/value stats. */
-function StatRow({ stats }: { stats: Array<{ label: string; value: string; tone?: 'danger' | 'success' }> }) {
+function StatRow({ stats }: { stats: { label: string; value: string; tone?: 'danger' | 'success' }[] }) {
   const { colors } = useTheme();
   return (
     <View style={styles.stats}>

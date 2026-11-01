@@ -85,9 +85,13 @@ export default function InboxScreen() {
 
   // The Calendar tab's search button opens Inbox with search focused
   const { focusSearch } = useLocalSearchParams<{ focusSearch?: string }>();
+  const [seenFocusSearch, setSeenFocusSearch] = useState<string | undefined>(undefined);
+  if (focusSearch !== seenFocusSearch) {
+    setSeenFocusSearch(focusSearch);
+    if (focusSearch) setSearchOpen(true);
+  }
   useEffect(() => {
     if (!focusSearch) return;
-    setSearchOpen(true);
     const id = setTimeout(() => searchRef.current?.focus(), 150);
     return () => clearTimeout(id);
   }, [focusSearch]);

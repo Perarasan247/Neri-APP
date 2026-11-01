@@ -26,7 +26,7 @@ interface RepeatSheetProps {
   footnote?: string;
 }
 
-const FREQUENCIES: Array<{ value: RepeatFrequency; label: string }> = [
+const FREQUENCIES: { value: RepeatFrequency; label: string }[] = [
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },

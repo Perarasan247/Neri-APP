@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import {
-  Archive,
   BarChart3,
   CalendarDays,
   CheckSquare,
@@ -96,6 +95,7 @@ export default function TodayScreen() {
   const [skip, setSkip] = useState<SkipState | null>(null);
   const [noteItem, setNoteItem] = useState<TodayItem | null>(null);
   const [valueItem, setValueItem] = useState<TodayItem | null>(null);
+  const [doneItem, setDoneItem] = useState<TodayItem | null>(null);
 
   const onError = (e: Error) => toast(e.message, { tone: 'danger' });
 
@@ -123,6 +123,11 @@ export default function TodayScreen() {
   /* ----- Habit actions ----- */
   const handleToggle = (item: TodayItem) => {
     const done = item.status !== 'done';
+    // "Done + log a number" habits ask for an optional amount before completing
+    if (done && item.habit.metric_label) {
+      setDoneItem(item);
+      return;
+    }
     if (done) haptic.success();
     toggleHabit.mutate({ habitId: item.habit.id, date: viewDate, done }, { onError });
   };
@@ -134,8 +139,8 @@ export default function TodayScreen() {
     incrementHabit.mutate({ habitId: item.habit.id, date: viewDate, delta }, { onError });
   };
 
-  const handleSaveValue = (value: number) => {
-    if (!valueItem) return;
+  const handleSaveValue = (value: number | null) => {
+    if (!valueItem || value === null) return;
     if (valueItem.status !== 'done') haptic.success();
     addValue.mutate(
       { habitId: valueItem.habit.id, date: viewDate, value },
@@ -147,6 +152,15 @@ export default function TodayScreen() {
         onError,
       },
     );
+  };
+
+  const handleConfirmDone = (value: number | null) => {
+    if (!doneItem) return;
+    haptic.success();
+    const close = { onSuccess: () => setDoneItem(null), onError };
+    // Logging an amount also counts as doing the habit; with no amount it's a plain mark done
+    if (value) addValue.mutate({ habitId: doneItem.habit.id, date: viewDate, value }, close);
+    else toggleHabit.mutate({ habitId: doneItem.habit.id, date: viewDate, done: true }, close);
   };
 
   const handleSaveNote = (note: string) => {
@@ -535,6 +549,16 @@ export default function TodayScreen() {
         initialNote={noteItem?.note}
         loading={upsertLog.isPending}
         onSave={handleSaveNote}
+      />
+
+      <ValueSheet
+        markDone
+        visible={doneItem !== null}
+        onClose={() => setDoneItem(null)}
+        habitName={doneItem?.habit.name}
+        unit={doneItem?.habit.metric_unit}
+        loading={toggleHabit.isPending || addValue.isPending}
+        onSave={handleConfirmDone}
       />
 
       {picker.element}

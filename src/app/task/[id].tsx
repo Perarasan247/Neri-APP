@@ -543,6 +543,7 @@ function TaskDetail({ todo }: { todo: Todo }) {
         visible={prioritySheet.open}
         onClose={prioritySheet.hide}
         title="Priority"
+        // eslint-disable-next-line react-hooks/refs -- save() reads editScope only when a menu item is picked
         options={priorityMenu(todo.priority, (p) => save({ priority: p }), colors)}
       />
       <CategoryPicker

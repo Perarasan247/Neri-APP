@@ -189,7 +189,7 @@ function DialogCard({
   onPress: (b: DialogButton) => void;
 }) {
   const { colors } = useTheme();
-  const anim = useRef(new Animated.Value(0)).current;
+  const [anim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     let live = true;

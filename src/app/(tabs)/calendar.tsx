@@ -94,7 +94,7 @@ export default function CalendarScreen() {
   const [center, setCenter] = useState(() => centerDate(ref, SPAN[DEFAULT_VIEW as keyof typeof SPAN] ?? 3));
   const gridRef = useRef<TimeGridHandle>(null);
 
-  const animX = useRef(new Animated.Value(0)).current;
+  const [animX] = useState(() => new Animated.Value(0));
   const isAnimating = useRef(false);
 
   useEffect(() => {
@@ -219,6 +219,7 @@ export default function CalendarScreen() {
 
   const pan = useMemo(
     () =>
+      // eslint-disable-next-line react-hooks/refs -- pageRef is only read inside the swipe-release callback
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,

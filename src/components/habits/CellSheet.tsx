@@ -60,7 +60,7 @@ function CellForm({ habit, cell, onClose }: CellSelection & { onClose: () => voi
     );
   };
 
-  const modeOptions: Array<{ value: Mode; label: string }> = isYesNo
+  const modeOptions: { value: Mode; label: string }[] = isYesNo
     ? [
         { value: 'done', label: 'Done' },
         { value: 'not_done', label: 'Not done' },

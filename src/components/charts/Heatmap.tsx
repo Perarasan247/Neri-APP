@@ -21,7 +21,7 @@ interface HeatmapProps<T extends HeatmapDay> {
   /** One-line description shown after tapping a day. */
   describe: (d: T) => string;
   /** Legend swatches (low → high) and extra keys (e.g. Rest). */
-  legend?: { low: string; high: string; steps: string[]; extra?: Array<{ label: string; color: string }> };
+  legend?: { low: string; high: string; steps: string[]; extra?: { label: string; color: string }[] };
 }
 
 const GAP = 3;
@@ -59,7 +59,7 @@ export function Heatmap<T extends HeatmapDay>({ days, colorFor, describe, legend
   const gridH = MONTH_LABEL_H + 7 * cell + 6 * GAP;
 
   // Month label above the first column of each month.
-  const monthLabels: Array<{ col: number; label: string }> = [];
+  const monthLabels: { col: number; label: string }[] = [];
   let lastMonth = -1;
   columns.forEach((c, ci) => {
     const first = c.find(Boolean);

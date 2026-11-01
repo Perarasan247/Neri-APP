@@ -217,7 +217,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 function ToastView({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const anim = useRef(new Animated.Value(0)).current;
+  const [anim] = useState(() => new Animated.Value(0));
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
   }, [anim]);
@@ -263,12 +263,12 @@ export const useToast = () => useContext(ToastContext);
 const styles = StyleSheet.create({
   sheetHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
     paddingTop: space.sm,
     maxHeight: '90%',
   },
-  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: space.md },
+  grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, marginBottom: space.md },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -284,8 +284,8 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    borderRadius: radius.md,
+    paddingVertical: space.md + 2,
+    borderRadius: radius.lg,
     shadowColor: '#000',
     shadowOpacity: 0.2,
     shadowRadius: 10,

@@ -7,7 +7,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { CheckCircle2, Flame, Hash, ShieldAlert, type LucideIcon } from 'lucide-react-native';
 
 import type { FrequencyType, HabitSchedule, HabitType } from '@/api/types';
-import { Chip, Field, HABIT_ICONS, HabitTile, Segmented, Text, TextField, withAlpha } from '@/components/ui';
+import { Chip, Field, HABIT_ICONS, HabitTile, Segmented, Text, withAlpha } from '@/components/ui';
 import { HABIT_TYPE_META, WEEKDAY_LETTERS } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -16,13 +16,13 @@ import { Stepper } from './Stepper';
 
 /* ---------- Options ---------- */
 
-export const HABIT_TYPES: Array<{ value: HabitType; Icon: LucideIcon }> = [
+export const HABIT_TYPES: { value: HabitType; Icon: LucideIcon }[] = [
   { value: 'build_yesno', Icon: CheckCircle2 },
   { value: 'build_count', Icon: Hash },
   { value: 'avoid_count', Icon: ShieldAlert },
 ];
 
-export const FREQUENCY_OPTIONS: Array<{ value: FrequencyType; label: string }> = [
+export const FREQUENCY_OPTIONS: { value: FrequencyType; label: string }[] = [
   { value: 'daily', label: 'Daily' },
   { value: 'weekdays', label: 'Days' },
   { value: 'times_per_week', label: 'Per week' },
@@ -172,54 +172,17 @@ export function FormSection({
 
 /* ---------- Pickers ---------- */
 
-/** Optional "also log a number" setting for Yes/No habits (pages read, minutes…); no goal attached. */
-export function MetricPicker({
-  label,
-  unit,
-  onLabelChange,
-  onUnitChange,
-}: {
-  label: string;
-  unit: string;
-  onLabelChange: (v: string) => void;
-  onUnitChange: (v: string) => void;
-}) {
-  const [on, setOn] = React.useState(label.trim() !== '' || unit !== '');
+/** Optional "log a number when marking done" setting for Yes/No habits; no goal attached. */
+export function NumberLogPicker({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <View style={{ gap: space.md }}>
-      <Segmented<'off' | 'on'>
-        value={on ? 'on' : 'off'}
-        onChange={(v) => {
-          setOn(v === 'on');
-          if (v === 'off') {
-            onLabelChange('');
-            onUnitChange('');
-          }
-        }}
-        options={[
-          { value: 'off', label: 'Just mark done' },
-          { value: 'on', label: 'Done + log a number' },
-        ]}
-      />
-      {on ? (
-        <View style={{ gap: space.sm }}>
-          <TextField
-            value={label}
-            onChangeText={onLabelChange}
-            placeholder="What to log, e.g. Pages read"
-            accessibilityLabel="Value to log"
-            maxLength={64}
-          />
-          <TextField
-            value={unit}
-            onChangeText={onUnitChange}
-            placeholder="Unit, e.g. pages"
-            accessibilityLabel="Unit"
-            maxLength={32}
-          />
-        </View>
-      ) : null}
-    </View>
+    <Segmented<'off' | 'on'>
+      value={value ? 'on' : 'off'}
+      onChange={(v) => onChange(v === 'on')}
+      options={[
+        { value: 'off', label: 'Just mark done' },
+        { value: 'on', label: 'Done + log a number' },
+      ]}
+    />
   );
 }
 
@@ -504,7 +467,7 @@ export function CategorySuggestions({
 }
 
 /** Merge existing habit categories with defaults, de-duplicated, existing first. */
-export function categorySuggestions(existing: Array<string | undefined>): string[] {
+export function categorySuggestions(existing: (string | undefined)[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const c of [...existing, ...DEFAULT_CATEGORIES]) {

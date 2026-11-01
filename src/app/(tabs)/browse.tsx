@@ -8,7 +8,6 @@ import {
   CalendarCheck,
   Inbox,
   ListChecks,
-  Plus,
   Repeat,
   Settings,
 } from 'lucide-react-native';
@@ -96,7 +95,6 @@ export default function BrowseScreen() {
           label="Habit tracker"
           onPress={() => router.navigate('/(tabs)/habits')}
         />
-        <NavRow icon={<Plus size={ICON} color={tint} />} label="New habit" onPress={() => router.push('/habit/new')} />
         <NavRow
           icon={<Archive size={ICON} color={tint} />}
           label="Archived habits"

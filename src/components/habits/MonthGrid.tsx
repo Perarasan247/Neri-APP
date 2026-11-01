@@ -16,7 +16,7 @@ import { radius, space } from '@/theme/tokens';
 
 export function MonthSummary({ summary }: { summary: MonthlyData['summary'] }) {
   const { colors } = useTheme();
-  const items: Array<[string, string]> = [
+  const items: [string, string][] = [
     [`${summary.completion_rate}%`, 'Completion'],
     [`${summary.total_done}/${summary.total_eligible}`, 'Done'],
     [String(summary.perfect_days), 'Perfect days'],
@@ -145,7 +145,7 @@ export function MonthRuler({ days }: { days: number }) {
 
 export function MonthLegend() {
   const { colors: c } = useTheme();
-  const items: Array<[object, string]> = [
+  const items: [object, string][] = [
     [{ backgroundColor: c.accent }, 'Done'],
     [{ backgroundColor: withAlpha(c.accent, 0.4) }, 'Partial'],
     [{ backgroundColor: c.mutedStrong }, 'Missed'],

@@ -11,7 +11,7 @@ import {
   FormSection,
   HabitPreview,
   IconPicker,
-  MetricPicker,
+  NumberLogPicker,
   ScheduleEditor,
   TypePicker,
   categorySuggestions,
@@ -54,8 +54,7 @@ export default function NewHabitScreen() {
     target_count: 3,
     daily_target: 1,
   });
-  const [metricLabel, setMetricLabel] = useState('');
-  const [metricUnit, setMetricUnit] = useState('');
+  const [logNumber, setLogNumber] = useState(false);
   const [startDate, setStartDate] = useState(todayStr);
   const [icon, setIcon] = useState('Target');
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
@@ -91,9 +90,8 @@ export default function NewHabitScreen() {
         icon,
         category: category.trim() || 'Personal',
         description: description.trim() || undefined,
-        ...(type === 'build_yesno' && metricLabel.trim()
-          ? { metric_label: metricLabel.trim(), metric_unit: metricUnit.trim() || undefined }
-          : {}),
+        // The amount is named after the habit; there is no unit to configure
+        ...(type === 'build_yesno' && logNumber ? { metric_label: name.trim().slice(0, 64) } : {}),
         schedule: { ...schedulePayload(schedule, type), effective_from: startDate },
       },
       {
@@ -161,14 +159,9 @@ export default function NewHabitScreen() {
           {type === 'build_yesno' ? (
             <FormSection
               title="Also log a number?"
-              hint="Track an amount like pages read. It has no goal; it shows up in Insights."
+              hint="When you mark it done you can type an amount, like pages read. It's optional and shows up in Insights."
             >
-              <MetricPicker
-                label={metricLabel}
-                unit={metricUnit}
-                onLabelChange={setMetricLabel}
-                onUnitChange={setMetricUnit}
-              />
+              <NumberLogPicker value={logNumber} onChange={setLogNumber} />
             </FormSection>
           ) : null}
 

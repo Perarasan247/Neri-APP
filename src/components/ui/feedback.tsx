@@ -1,10 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { CloudOff } from 'lucide-react-native';
 
 import { ApiError } from '@/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
-import { radius, space } from '@/theme/tokens';
+import { elevation, radius, space } from '@/theme/tokens';
 import { Button } from './controls';
 import { Text } from './Text';
 
@@ -24,7 +24,11 @@ export function EmptyState({
   const { colors } = useTheme();
   return (
     <View style={[styles.empty, style]}>
-      {icon ? <View style={[styles.emptyIcon, { backgroundColor: colors.muted }]}>{icon}</View> : null}
+      {icon ? (
+        <View style={[styles.emptyIcon, { backgroundColor: colors.surface, borderColor: colors.line, shadowColor: colors.shadow }]}>
+          {icon}
+        </View>
+      ) : null}
       <Text variant="title" center>
         {title}
       </Text>
@@ -57,7 +61,7 @@ export function ErrorState({ error, onRetry, style }: { error: unknown; onRetry?
 /** Pulsing placeholder blocks while the first load is in flight. */
 export function Skeleton({ height = 16, width = '100%', style }: { height?: number; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
   const { colors } = useTheme();
-  const opacity = useRef(new Animated.Value(0.5)).current;
+  const [opacity] = useState(() => new Animated.Value(0.5));
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
@@ -127,9 +131,11 @@ export function Notice({
 const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: space.sm, paddingVertical: space.xxxl * 1.5, paddingHorizontal: space.xxl },
   emptyIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 60,
+    height: 60,
+    borderRadius: radius.lg + 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    ...elevation.raised,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: space.sm,
@@ -138,7 +144,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    padding: space.md,
-    borderRadius: radius.md,
+    padding: space.md + 2,
+    borderRadius: radius.lg,
   },
 });

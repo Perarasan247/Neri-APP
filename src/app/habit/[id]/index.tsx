@@ -27,7 +27,7 @@ import {
   type MenuOption,
 } from '@/components/ui';
 import { useDeleteHabit, useHabit, useHabitInsights, useReopenHabit } from '@/hooks/queries';
-import { describeSchedule, friendlyDate, HABIT_TYPE_META, pluralize, streakText, today } from '@/lib/format';
+import { describeSchedule, friendlyDate, HABIT_TYPE_META, streakText, today } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
 import { space } from '@/theme/tokens';
 

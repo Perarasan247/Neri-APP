@@ -336,7 +336,7 @@ function TimeGridImpl({
   const pendingRef = useRef<number | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
+  const [scrollX] = useState(() => new Animated.Value(0));
   const headX = useMemo(() => Animated.multiply(scrollX, -1), [scrollX]);
 
   const dateAt = useCallback(
@@ -374,6 +374,7 @@ function TimeGridImpl({
   // Offset goes to the native thread; the listener only runs the cheap index check above.
   const onScroll = useMemo(
     () =>
+      // eslint-disable-next-line react-hooks/refs -- handleScroll touches refs only in the scroll listener
       Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
         useNativeDriver: true,
         listener: handleScroll,

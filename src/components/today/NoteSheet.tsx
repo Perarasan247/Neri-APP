@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Sheet, TextField } from '@/components/ui';
@@ -17,9 +17,12 @@ interface NoteSheetProps {
 export function NoteSheet({ visible, onClose, habitName, initialNote, loading, onSave }: NoteSheetProps) {
   const [note, setNote] = useState('');
 
-  useEffect(() => {
+  // Start from the saved note each time the sheet opens
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (visible !== wasVisible) {
+    setWasVisible(visible);
     if (visible) setNote(initialNote ?? '');
-  }, [visible, initialNote]);
+  }
 
   return (
     <Sheet

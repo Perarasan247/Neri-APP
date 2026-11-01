@@ -12,11 +12,11 @@ export interface ParsedTodo {
   startTime?: string;
   endTime?: string;
   repeat?: Repeat;
-  chips: Array<{
+  chips: {
     type: 'date' | 'time' | 'priority' | 'category' | 'repeat';
     label: string;
     value: string;
-  }>;
+  }[];
 }
 
 const DAY = '(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)';

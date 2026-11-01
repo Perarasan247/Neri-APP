@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Info } from 'lucide-react-native';
 
@@ -30,9 +30,12 @@ export function SkipSheet({ visible, onClose, scope, habitName, date, initialRea
   const { colors } = useTheme();
   const [reason, setReason] = useState('');
 
-  useEffect(() => {
+  // Start from the saved reason each time the sheet opens
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (visible !== wasVisible) {
+    setWasVisible(visible);
     if (visible) setReason(initialReason ?? '');
-  }, [visible, initialReason]);
+  }
 
   const title = scope === 'day' ? 'Take a rest day' : `Skip ${habitName ?? 'habit'}`;
 

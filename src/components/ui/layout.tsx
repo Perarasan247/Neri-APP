@@ -129,7 +129,7 @@ export function Card({ style, padded, ...props }: ViewProps & { padded?: boolean
   const s = useStyles((c) => ({
     card: {
       backgroundColor: c.surface,
-      borderRadius: radius.lg,
+      borderRadius: radius.xl,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.line,
       overflow: 'hidden' as const,
@@ -153,9 +153,14 @@ export function SectionHeader({ title, count, tone = 'fg', action, collapsed, on
   const { colors } = useTheme();
   const content = (
     <View style={[styles.sectionHeader, style]}>
-      <Text variant="small" weight="semibold" tone={tone === 'muted' ? 'muted' : tone}>
+      <Text
+        variant="caption"
+        weight="semibold"
+        tone={tone === 'muted' ? 'subtle' : tone === 'fg' ? 'muted' : tone}
+        style={{ textTransform: 'uppercase', letterSpacing: 0.7 }}
+      >
         {title}
-        {count !== undefined ? <Text variant="small" tone="subtle">{`  ${count}`}</Text> : null}
+        {count !== undefined ? <Text variant="caption" tone="subtle">{`  ${count}`}</Text> : null}
       </Text>
       <View style={styles.sectionRight}>
         {action ? (
@@ -199,7 +204,7 @@ export function Spacer({ size = space.lg }: { size?: number }) {
 }
 
 const styles = StyleSheet.create({
-  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md, marginBottom: space.xl },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md, marginBottom: space.xl, marginTop: space.sm },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: 2 },
   sectionHeader: {
     flexDirection: 'row',

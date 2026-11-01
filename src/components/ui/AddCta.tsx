@@ -28,8 +28,8 @@ export function AddCta({
       style={({ pressed }) => [
         styles.root,
         {
-          borderColor: withAlpha(colors.accent, pressed ? 0.8 : 0.5),
-          backgroundColor: pressed ? withAlpha(colors.accent, 0.16) : colors.accentSoft,
+          borderColor: pressed ? withAlpha(colors.accent, 0.6) : colors.lineStrong,
+          backgroundColor: pressed ? colors.accentSoft : 'transparent',
         },
         style,
       ]}
@@ -37,7 +37,7 @@ export function AddCta({
       <View style={[styles.badge, { backgroundColor: colors.accent }]}>
         <Plus size={14} color={colors.accentFg} strokeWidth={3} />
       </View>
-      <Text variant="body" weight="bold" tone="accent">
+      <Text variant="body" weight="medium" tone="muted">
         {label}
       </Text>
       {hint ? (
@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: space.md,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1.25,
     borderStyle: 'dashed',
   },
   badge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

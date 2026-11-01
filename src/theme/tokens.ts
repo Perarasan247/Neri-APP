@@ -1,82 +1,84 @@
 /**
- * Design tokens. Mirrors the web app's Ledger theme (frontend/src/index.css)
+ * Design tokens. Mirrors the web app's Neri theme (frontend/src/index.css)
  * so both clients feel like one product. Components never use raw hex values;
  * they read these through `useTheme()`.
  */
 
 export const palette = {
   light: {
-    canvas: '#f6f8fa',
+    canvas: '#f5f5f7',
     surface: '#ffffff',
-    subtle: '#fafbfc',
-    muted: '#f1f4f7',
-    mutedStrong: '#e6eaef',
-    line: '#e3e8ee',
-    lineStrong: '#d5dbe1',
+    subtle: '#fafafb',
+    muted: '#f1f1f4',
+    mutedStrong: '#e6e6eb',
+    line: '#e9e9ee',
+    lineStrong: '#d9d9e0',
 
-    fg: '#1a1f36',
-    fgSoft: '#3c4257',
-    fgMuted: '#697386',
-    fgSubtle: '#8792a2',
+    fg: '#121218',
+    fgSoft: '#373744',
+    fgMuted: '#6a6a7a',
+    fgSubtle: '#93939f',
 
-    accent: '#635bff',
-    accentPressed: '#544de0',
-    accentSoft: '#f0efff',
+    accent: '#5b4ff5',
+    accentPressed: '#4d41e6',
+    accentSoft: '#f0eeff',
     accentFg: '#ffffff',
-    accentText: '#5851ea',
+    accentText: '#4e42e3',
+    accent2: '#9a5cff',
 
-    success: '#0e7a54',
-    successSoft: '#d7f7e6',
-    warning: '#a35200',
-    warningSoft: '#fdedd3',
-    danger: '#c0123c',
-    dangerSoft: '#ffe7ec',
-    info: '#0062c4',
-    infoSoft: '#e0efff',
+    success: '#0a7d57',
+    successSoft: '#e1f5ec',
+    warning: '#a95400',
+    warningSoft: '#fdf1df',
+    danger: '#d02848',
+    dangerSoft: '#fdebee',
+    info: '#1f66d6',
+    infoSoft: '#e7effd',
 
-    p1: '#df1b41',
-    p2: '#e56f00',
-    p3: '#0570de',
-    p4: '#8792a2',
+    p1: '#e5294b',
+    p2: '#ea7a0c',
+    p3: '#2f74e6',
+    p4: '#93939f',
 
-    overlay: 'rgba(26, 31, 54, 0.4)',
-    shadow: '#1a1f36',
+    overlay: 'rgba(18, 18, 24, 0.38)',
+    shadow: '#121218',
   },
   dark: {
-    canvas: '#0e131b',
-    surface: '#161d29',
-    subtle: '#1a2230',
-    muted: '#1e2634',
-    mutedStrong: '#283142',
-    line: '#262f3e',
-    lineStrong: '#344052',
+    canvas: '#0b0b0f',
+    surface: '#141419',
+    subtle: '#17171d',
+    muted: '#1c1c23',
+    mutedStrong: '#26262f',
+    line: '#23232b',
+    lineStrong: '#31313b',
 
-    fg: '#e6e9f0',
-    fgSoft: '#c3cad6',
-    fgMuted: '#98a2b3',
-    fgSubtle: '#6f7a8d',
+    fg: '#ededf2',
+    fgSoft: '#c8c8d2',
+    fgMuted: '#9696a6',
+    fgSubtle: '#6b6b7b',
 
-    accent: '#7a73ff',
-    accentPressed: '#8c86ff',
-    accentSoft: '#24224a',
+    accent: '#7466ff',
+    accentPressed: '#8679ff',
+    accentSoft: '#1f1b3c',
     accentFg: '#ffffff',
-    accentText: '#a9a4ff',
+    accentText: '#aaa1ff',
+    accent2: '#b07cff',
 
-    success: '#3ecf8e',
-    successSoft: '#10352a',
-    warning: '#f0a54a',
-    warningSoft: '#3a2a14',
-    danger: '#ff6b85',
-    dangerSoft: '#3f1724',
-    info: '#5ea8ff',
-    infoSoft: '#132b48',
+    success: '#3dd598',
+    successSoft: '#0f2a20',
+    warning: '#f3a83b',
+    warningSoft: '#2e2211',
+    danger: '#ff6b81',
+    dangerSoft: '#3a1520',
+    info: '#62a4ff',
+    infoSoft: '#13223b',
 
-    p1: '#ff5c7a',
-    p2: '#ff9a3d',
-    p3: '#5ea8ff',
-    p4: '#7d8799',
+    p1: '#ff5f79',
+    p2: '#ff9b40',
+    p3: '#62a4ff',
+    p4: '#74748a',
 
-    overlay: 'rgba(0, 0, 0, 0.6)',
+    overlay: 'rgba(0, 0, 0, 0.62)',
     shadow: '#000000',
   },
 } as const;
@@ -99,10 +101,18 @@ export const space = {
 export const radius = {
   xs: 4,
   sm: 6,
-  md: 8,
-  lg: 12,
-  xl: 16,
+  md: 10,
+  lg: 14,
+  xl: 18,
+  xxl: 24,
   pill: 999,
+} as const;
+
+/** Soft, layered elevation (iOS shadow + Android elevation). Color comes from `colors.shadow`. */
+export const elevation = {
+  card: { shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  raised: { shadowOpacity: 0.1, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 4 },
+  float: { shadowOpacity: 0.28, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
 } as const;
 
 export const font = {
@@ -113,7 +123,7 @@ export const font = {
   bodyLarge: { fontSize: 16, lineHeight: 22 },
   title: { fontSize: 17, lineHeight: 22 },
   heading: { fontSize: 22, lineHeight: 28 },
-  display: { fontSize: 28, lineHeight: 34 },
+  display: { fontSize: 32, lineHeight: 38 },
 } as const;
 
 export const weight = {
@@ -124,7 +134,7 @@ export const weight = {
 } as const;
 
 /** Brand gradient used for the logo tile. */
-export const brand = { from: '#635bff', to: '#a259ff' } as const;
+export const brand = { from: '#5b4ff5', to: '#9a5cff' } as const;
 
 /** Colors offered when creating habits and tasks (stored on the server). */
 export const PRESET_COLORS = [

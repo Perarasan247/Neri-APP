@@ -54,7 +54,7 @@ export function Text({
         {
           color: color ?? colors[toneKey[tone]],
           fontWeight: weights[weight ?? defaultWeight],
-          letterSpacing: variant === 'display' || variant === 'heading' ? -0.4 : 0,
+          letterSpacing: variant === 'display' ? -0.9 : variant === 'heading' ? -0.5 : variant === 'title' ? -0.2 : 0,
         },
         center && { textAlign: 'center' },
         tabular && { fontVariant: ['tabular-nums'] },

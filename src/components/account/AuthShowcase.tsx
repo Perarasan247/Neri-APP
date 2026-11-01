@@ -3,7 +3,7 @@
  * tasks, habit check-ins, calendar time blocking) with small animations.
  * Decorative only, so it is hidden from screen readers.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { ArrowUp, Calendar, Check, Clock, Flag, Flame, Hash, Repeat } from 'lucide-react-native';
@@ -14,7 +14,7 @@ import { brand, radius, space } from '@/theme/tokens';
 
 type SceneKey = 'tasks' | 'habits' | 'calendar';
 
-const SCENES: Array<{ key: SceneKey; title: string; text: string }> = [
+const SCENES: { key: SceneKey; title: string; text: string }[] = [
   {
     key: 'tasks',
     title: 'Capture tasks the way you think',
@@ -52,7 +52,7 @@ export function AuthShowcase() {
   const [index, setIndex] = useState(0);
   const [round, setRound] = useState(0);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const fade = useRef(new Animated.Value(0)).current;
+  const [fade] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     const id = setInterval(
@@ -190,12 +190,12 @@ type Chip = {
   label: string;
 };
 
-const EXAMPLES: Array<{
+const EXAMPLES: {
   text: string;
   title: string;
   chips: Chip[];
   token: 'success' | 'p1' | 'p3';
-}> = [
+}[] = [
   {
     text: 'Gym every Mon, Wed, Fri 7am',
     title: 'Gym',
@@ -443,7 +443,7 @@ const ROW = 34;
 function CalendarScene({ reduced }: { reduced: boolean }) {
   const { colors } = useTheme();
   const [step, setStep] = useState(reduced ? 4 : 0);
-  const grow = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const [grow] = useState(() => new Animated.Value(reduced ? 1 : 0));
 
   useEffect(() => {
     if (reduced) return;

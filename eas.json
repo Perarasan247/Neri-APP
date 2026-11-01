@@ -9,18 +9,21 @@
       "distribution": "internal"
     },
     "preview": {
+      "environment": "production",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "apk"
       }
     },
     "production-apk": {
+      "environment": "production",
       "autoIncrement": true,
       "android": {
         "buildType": "apk"

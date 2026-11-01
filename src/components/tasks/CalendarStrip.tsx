@@ -73,6 +73,7 @@ function useSwipe({ onPrev, onNext, canPrev = true }: NavProps) {
   useEffect(() => {
     handlers.current = { onPrev, onNext, canPrev };
   });
+  // eslint-disable-next-line react-hooks/refs -- handlers is only read inside the swipe-release callback
   const [responder] = useState(() =>
     PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,

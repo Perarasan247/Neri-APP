@@ -29,13 +29,14 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.fgMuted,
+        tabBarInactiveTintColor: colors.fgSubtle,
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.line,
           borderTopWidth: StyleSheet.hairlineWidth,
+          paddingTop: 4,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600', letterSpacing: 0.1 },
         sceneStyle: { backgroundColor: colors.canvas },
       }}
     >
@@ -64,7 +65,7 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  todayIcon: { width: 22, height: 22, borderWidth: 1.75, borderRadius: 5, overflow: 'hidden', alignItems: 'center' },
+  todayIcon: { width: 22, height: 22, borderWidth: 1.75, borderRadius: 6, overflow: 'hidden', alignItems: 'center' },
   todayBar: { width: '100%', height: 4 },
   todayNum: { fontSize: 10, lineHeight: 13 },
 });

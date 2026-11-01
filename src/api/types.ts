@@ -197,13 +197,13 @@ export interface DashboardInsights {
   calendar_heatmap: any[];
   habit_timeline: any[];
   active_vs_archived: { active: number; archived: number };
-  rest_days_details: Array<{
+  rest_days_details: {
     date: string;
     scope: 'whole_day' | 'habit';
     habit_name?: string;
     habit_color?: string;
     reason: string;
-  }>;
+  }[];
 }
 
 export interface HabitInsightWidget {

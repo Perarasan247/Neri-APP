@@ -12,7 +12,7 @@ import { space } from '@/theme/tokens';
 
 export type RangeKey = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
 
-const OPTIONS: Array<{ value: RangeKey; label: string }> = [
+const OPTIONS: { value: RangeKey; label: string }[] = [
   { value: 'today', label: 'Today' },
   { value: 'week', label: 'Week' },
   { value: 'month', label: 'Month' },

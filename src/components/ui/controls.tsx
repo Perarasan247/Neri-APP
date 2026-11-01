@@ -10,12 +10,12 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Check, Plus } from 'lucide-react-native';
 
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
-import { font, radius, space } from '@/theme/tokens';
+import { brand, elevation, font, radius, space } from '@/theme/tokens';
 import { withAlpha } from './HabitIcon';
 import { requestReveal } from './keyboard';
 import { Text } from './Text';
@@ -54,7 +54,7 @@ export function Button({
     danger: { bg: c.danger, pressed: c.danger, fg: '#ffffff', border: 'transparent' },
     dangerGhost: { bg: 'transparent', pressed: c.dangerSoft, fg: c.danger, border: 'transparent' },
   }[variant];
-  const h = { sm: 32, md: 40, lg: 48 }[size];
+  const h = { sm: 34, md: 44, lg: 52 }[size];
 
   return (
     <Pressable
@@ -69,12 +69,15 @@ export function Button({
         styles.button,
         {
           height: h,
-          paddingHorizontal: size === 'sm' ? space.md : space.lg,
+          paddingHorizontal: size === 'sm' ? space.md : space.lg + 2,
+          borderRadius: size === 'sm' ? radius.md : radius.md + 2,
           backgroundColor: pressed ? v.pressed : v.bg,
           borderColor: v.border,
           opacity: disabled ? 0.5 : 1,
           alignSelf: block ? 'stretch' : 'auto',
+          transform: [{ scale: pressed ? 0.98 : 1 }],
         },
+        variant === 'primary' && !disabled && { shadowColor: c.accent, ...elevation.raised, shadowOpacity: 0.28 },
         style,
       ]}
       {...props}
@@ -130,9 +133,19 @@ export function Fab({ onPress, label = 'Add' }: { onPress: () => void; label?: s
       }}
       style={({ pressed }) => [
         styles.fab,
-        { backgroundColor: pressed ? colors.accentPressed : colors.accent, shadowColor: colors.accent },
+        { backgroundColor: colors.accent, shadowColor: colors.accent, transform: [{ scale: pressed ? 0.94 : 1 }] },
       ]}
     >
+      {/* Brand gradient, same as the logo (indigo to violet) */}
+      <Svg width={56} height={56} style={StyleSheet.absoluteFill}>
+        <Defs>
+          <LinearGradient id="fabGradient" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor={brand.from} />
+            <Stop offset="1" stopColor={brand.to} />
+          </LinearGradient>
+        </Defs>
+        <Rect width={56} height={56} rx={radius.xl} fill="url(#fabGradient)" />
+      </Svg>
       <Plus size={26} color={colors.accentFg} strokeWidth={2.5} />
     </Pressable>
   );
@@ -216,7 +229,7 @@ export function Chip({
       style={({ pressed }) => [
         styles.chip,
         {
-          borderColor: selected ? tint : colors.lineStrong,
+          borderColor: selected ? withAlpha(tint, 0.55) : colors.lineStrong,
           backgroundColor: selected ? withAlpha(tint, 0.12) : pressed ? colors.muted : colors.surface,
         },
         style,
@@ -239,7 +252,7 @@ export function Segmented<T extends string>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  options: Array<{ value: T; label: string }>;
+  options: { value: T; label: string }[];
   style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useTheme();
@@ -296,10 +309,10 @@ export function TextField({
           backgroundColor: colors.surface,
           borderWidth: 1,
           borderColor: invalid ? colors.danger : colors.lineStrong,
-          borderRadius: radius.md,
-          paddingHorizontal: space.md,
+          borderRadius: radius.md + 2,
+          paddingHorizontal: space.md + 2,
           paddingVertical: multiline ? space.md : 0,
-          minHeight: multiline ? 88 : 44,
+          minHeight: multiline ? 92 : 48,
           textAlignVertical: multiline ? 'top' : 'center',
         },
         style,
@@ -454,7 +467,7 @@ export function Kpi({
         {label}
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xs, flexWrap: 'wrap' }}>
-        <Text variant="heading" tabular weight="semibold" tone={valueTone}>
+        <Text variant="heading" tabular weight="bold" tone={valueTone} style={{ fontSize: 24, lineHeight: 30 }}>
           {value}
         </Text>
         {delta}
@@ -514,28 +527,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+    ...elevation.float,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs + 2,
-    height: 32,
-    paddingHorizontal: space.md,
+    height: 34,
+    paddingHorizontal: space.md + 2,
     borderRadius: radius.pill,
     borderWidth: 1,
   },
-  segmented: { flexDirection: 'row', borderRadius: radius.md, padding: 3 },
-  segment: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: space.sm },
+  segmented: { flexDirection: 'row', borderRadius: radius.md + 2, padding: 3 },
+  segment: { flex: 1, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md - 1, paddingHorizontal: space.sm },
   segmentActive: {
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    elevation: 2,
   },
   badge: {
     flexDirection: 'row',
@@ -544,7 +554,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: radius.xs,
+    borderRadius: radius.sm,
   },
-  kpi: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space.md + 2 },
+  kpi: { borderRadius: radius.xl, borderWidth: StyleSheet.hairlineWidth, padding: space.lg },
 });

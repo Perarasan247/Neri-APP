@@ -12,7 +12,7 @@ import {
   FormSection,
   HabitPreview,
   IconPicker,
-  MetricPicker,
+  NumberLogPicker,
   ScheduleEditor,
   categorySuggestions,
   scheduleChanged,
@@ -81,8 +81,7 @@ function EditForm({ habit }: { habit: Habit }) {
   const [category, setCategory] = useState(habit.category ?? '');
   const [description, setDescription] = useState(habit.description ?? '');
   const [sortOrder, setSortOrder] = useState(habit.sort_order ?? 0);
-  const [metricLabel, setMetricLabel] = useState(habit.metric_label ?? '');
-  const [metricUnit, setMetricUnit] = useState(habit.metric_unit ?? '');
+  const [logNumber, setLogNumber] = useState(!!habit.metric_label);
   const [schedule, setSchedule] = useState<ScheduleDraft>(original);
   const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [error, setError] = useState<string | null>(null);
@@ -96,8 +95,7 @@ function EditForm({ habit }: { habit: Habit }) {
     category.trim() !== (habit.category ?? '') ||
     description.trim() !== (habit.description ?? '') ||
     sortOrder !== habit.sort_order ||
-    (habit.type === 'build_yesno' &&
-      (metricLabel.trim() !== (habit.metric_label ?? '') || metricUnit.trim() !== (habit.metric_unit ?? '')));
+    (habit.type === 'build_yesno' && logNumber !== !!habit.metric_label);
   const scheduleDirty = habit.type !== 'avoid_count' && scheduleChanged(schedule, original, habit.type);
   const scheduleError = scheduleDirty ? validateSchedule(schedule, habit.type) : null;
   const dirty = cosmeticsDirty || scheduleDirty;
@@ -124,7 +122,7 @@ function EditForm({ habit }: { habit: Habit }) {
               category: category.trim() || 'Personal',
               description: description.trim(),
               sort_order: sortOrder,
-              ...(habit.type === 'build_yesno' ? { metric_label: metricLabel.trim(), metric_unit: metricUnit.trim() } : {}),
+              ...(habit.type === 'build_yesno' ? { metric_label: logNumber ? (habit.metric_label ?? habit.name) : '' } : {}),
             }
           : undefined,
         schedule: scheduleDirty
@@ -249,14 +247,9 @@ function EditForm({ habit }: { habit: Habit }) {
           {habit.type === 'build_yesno' ? (
             <FormSection
               title="Also log a number?"
-              hint="Track an amount like pages read. Turning it off keeps past entries."
+              hint="When you mark it done you can type an amount, like pages read. It's optional and shows up in Insights."
             >
-              <MetricPicker
-                label={metricLabel}
-                unit={metricUnit}
-                onLabelChange={setMetricLabel}
-                onUnitChange={setMetricUnit}
-              />
+              <NumberLogPicker value={logNumber} onChange={setLogNumber} />
             </FormSection>
           ) : null}
 

@@ -137,7 +137,7 @@ export function ChartTooltip({
 }
 
 /** Legend row: colored swatch (box or line) + label in text ink. */
-export function Legend({ items }: { items: Array<{ color: string; label: string; dashed?: boolean; box?: boolean }> }) {
+export function Legend({ items }: { items: { color: string; label: string; dashed?: boolean; box?: boolean }[] }) {
   return (
     <View style={styles.legend}>
       {items.map((it) => (

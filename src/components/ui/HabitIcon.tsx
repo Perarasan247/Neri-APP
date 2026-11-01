@@ -25,7 +25,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 
 /** Same icon names the web app stores on habits (frontend/src/lib/icons.tsx). */
-export const HABIT_ICONS: Array<{ name: string; Icon: LucideIcon }> = [
+export const HABIT_ICONS: { name: string; Icon: LucideIcon }[] = [
   { name: 'Target', Icon: Target },
   { name: 'Dumbbell', Icon: Dumbbell },
   { name: 'BookOpen', Icon: BookOpen },
