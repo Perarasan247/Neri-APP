@@ -187,7 +187,11 @@ export default function HabitDetailScreen() {
                   label="Total slips"
                   value={String(avoidMetrics?.total_occurrences ?? 0)}
                   delta={<Delta value={Number(avoidMetrics?.trend_vs_prev ?? 0)} invert />}
-                  footnote="vs. prior period · fewer is better"
+                  footnote={
+                    avoidMetrics?.total_occurrences
+                      ? `Most in a day ${avoidMetrics.most_in_a_day ?? 0} · avg ${avoidMetrics.avg_per_day ?? 0}/day`
+                      : 'No slips in this period'
+                  }
                 />
               ) : habit.type === 'build_count' ? (
                 <Kpi

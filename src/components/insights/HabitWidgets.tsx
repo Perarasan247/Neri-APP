@@ -251,6 +251,13 @@ function Widget({ habit, widget }: { habit: Habit; widget: HabitInsightWidget })
               { label: 'Worst day', value: m.worst_weekday && m.worst_weekday !== 'None' ? String(m.worst_weekday).slice(0, 3) : '—' },
             ]}
           />
+          <StatRow
+            stats={[
+              { label: 'Most in a day', value: fmtNum(m.most_in_a_day) },
+              { label: 'Avg / day', value: fmtNum(m.avg_per_day) },
+              { label: 'Days slipped', value: fmtNum(m.slip_days) },
+            ]}
+          />
         </ChartCard>
       );
     }

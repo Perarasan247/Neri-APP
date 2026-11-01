@@ -1,25 +1,45 @@
-import React, { useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  type ScrollViewInstance,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, type ScrollViewInstance, StyleSheet, TextInput, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeInDown,
+  FadeOutUp,
+  LinearTransition,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Eye, EyeOff, Mail, Server } from 'lucide-react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, type LucideIcon } from 'lucide-react-native';
 
-import { AuthShowcase } from '@/components/account/AuthShowcase';
 import { BrandMark } from '@/components/account/BrandMark';
-import { ServerUrlSheet } from '@/components/account/ServerUrlSheet';
 import { KeyboardAvoider, KeyboardScrollView, Notice, Text, TextField } from '@/components/ui';
 import { useSession } from '@/hooks/session';
-import { config, isSupabaseConfigured } from '@/lib/config';
+import { isSupabaseConfigured } from '@/lib/config';
 import { haptic } from '@/lib/haptics';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
+
+type Mode = 'signIn' | 'signUp' | 'forgotPassword';
+
+const COPY: Record<Mode, { title: string; subtitle: string; action: string }> = {
+  signIn: { title: 'Welcome back', subtitle: 'Log in to pick up where you left off.', action: 'Log in' },
+  signUp: { title: 'Create your account', subtitle: 'Habits and tasks, in one calm place.', action: 'Create account' },
+  forgotPassword: { title: 'Reset your password', subtitle: 'We’ll email you a link to set a new one.', action: 'Send reset link' },
+};
+
+/** Staggered entrance for the screen's sections (respects the system "reduce motion" setting). */
+const enter = (step: number) =>
+  FadeInDown.delay(80 + step * 70)
+    .duration(520)
+    .easing(Easing.out(Easing.cubic));
 
 /** Sign in / sign up with Supabase, or reset your password. */
 export default function SignInScreen() {
@@ -27,385 +47,411 @@ export default function SignInScreen() {
   const insets = useSafeAreaInsets();
   const { signIn, signUp } = useSession();
 
-  const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn');
+  const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState<'auth' | 'reset' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [serverOpen, setServerOpen] = useState(false);
-  // Re-render the footnote after the server URL changes (config isn't reactive)
-  const [, setServerVersion] = useState(0);
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const confirmRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
 
   const isSignUp = mode === 'signUp';
   const isForgot = mode === 'forgotPassword';
+  const emailOk = email.trim().length > 3 && email.includes('@');
   const mismatch = isSignUp && confirmPassword !== '' && confirmPassword !== password;
   const canSubmit = isForgot
-    ? email.trim().length > 3 && email.includes('@')
-    : email.trim().length > 3 &&
-      password.length >= 6 &&
-      (!isSignUp || (confirmPassword.length > 0 && confirmPassword === password));
+    ? emailOk
+    : emailOk && password.length >= 6 && (!isSignUp || (confirmPassword.length > 0 && confirmPassword === password));
 
-  const submit = async () => {
-    if (!canSubmit || busy) return;
+  const switchMode = (next: Mode) => {
+    haptic.tap();
+    setMode(next);
+    setConfirmPassword('');
     setError(null);
     setNotice(null);
+  };
+
+  const submitAuth = async () => {
     if (isSignUp && password !== confirmPassword) {
       setError('The two passwords don’t match.');
       return;
     }
-    setBusy('auth');
-    try {
-      if (isSignUp) {
-        const { needsConfirmation } = await signUp(email.trim(), password);
-        if (needsConfirmation) {
-          setNotice('Account created. Check your email to confirm it, then log in.');
-          setConfirmPassword('');
-          setMode('signIn');
-        }
-      } else {
-        await signIn(email.trim(), password);
+    if (isSignUp) {
+      const { needsConfirmation } = await signUp(email.trim(), password);
+      if (needsConfirmation) {
+        setNotice('Account created. Check your email to confirm it, then log in.');
+        setConfirmPassword('');
+        setMode('signIn');
       }
-      // On success the root layout swaps this screen out automatically
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Authentication failed');
-    } finally {
-      setBusy(null);
+    } else {
+      await signIn(email.trim(), password);
     }
+    // On success the root layout swaps this screen out automatically
   };
 
-  const handleForgotPassword = async () => {
+  const submitReset = async () => {
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
+    if (resetError) throw resetError;
+    setNotice(`If an account exists for ${email.trim()}, we’ve sent a reset link.`);
+  };
+
+  const submit = async () => {
+    if (!canSubmit || busy) return;
+    haptic.tap();
     setError(null);
     setNotice(null);
-    if (!email.trim() || !email.includes('@')) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-    setBusy('reset');
+    setBusy(true);
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
-      if (resetError) throw resetError;
-      setNotice(`If an account exists for ${email.trim()}, password reset instructions have been sent.`);
-    } catch (e: any) {
-      setError(e instanceof Error ? e.message : 'Failed to send reset email');
+      await (isForgot ? submitReset() : submitAuth());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : isForgot ? 'Couldn’t send the reset email.' : 'Couldn’t log you in.');
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const scrollViewRef = useRef<ScrollViewInstance>(null);
+  const copy = COPY[mode];
 
   return (
     <KeyboardAvoider style={{ backgroundColor: colors.surface }}>
+      <Glow />
       <KeyboardScrollView
         ref={scrollViewRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + space.md, paddingBottom: insets.bottom + space.xxl },
+          { paddingTop: insets.top + space.xxxl, paddingBottom: insets.bottom + space.xxl },
         ]}
       >
         <View style={styles.inner}>
-          <View style={styles.brand}>
-            <BrandMark size={28} />
-            <Text variant="title" weight="semibold">
-              Neri
-            </Text>
-          </View>
+          <Animated.View entering={enter(0)} style={styles.logo}>
+            <BrandMark size={64} />
+          </Animated.View>
 
-          {!isForgot && <AuthShowcase />}
+          {/* Keyed by mode so the heading fades in fresh on every switch */}
+          <Animated.View key={mode} entering={FadeIn.duration(320)} style={styles.heading}>
+            <Animated.View entering={enter(1)}>
+              <Text variant="display" weight="bold" center style={{ letterSpacing: -0.8 }}>
+                {copy.title}
+              </Text>
+              <Text tone="muted" center style={{ marginTop: space.xs }}>
+                {copy.subtitle}
+              </Text>
+            </Animated.View>
+          </Animated.View>
 
-          <View style={{ marginTop: isForgot ? space.lg : space.xxl }}>
-            <Text variant="display" weight="bold" style={{ letterSpacing: -0.8 }}>
-              {isForgot
-                ? 'Reset password'
-                : isSignUp
-                  ? 'Create your account'
-                  : 'Welcome to Neri'}
-            </Text>
-            <Text tone="muted" style={{ marginTop: space.xs }}>
-              {isForgot
-                ? 'Enter your registered email address to receive recovery instructions.'
-                : isSignUp
-                  ? 'Start tracking habits and tasks in one calm place.'
-                  : 'Plan your tasks, keep your habits, own your week.'}
-            </Text>
-          </View>
+          {isSupabaseConfigured ? (
+            <Animated.View entering={enter(2)} layout={LinearTransition.duration(260)} style={styles.form}>
+              {error ? (
+                <Shake trigger={error}>
+                  <Notice tone="danger">{error}</Notice>
+                </Shake>
+              ) : null}
+              {notice ? (
+                <Animated.View entering={FadeInDown.duration(260)}>
+                  <Notice tone="success">{notice}</Notice>
+                </Animated.View>
+              ) : null}
 
-          <View style={{ marginTop: space.xl, gap: space.md }}>
-            {error ? <Notice tone="danger">{error}</Notice> : null}
-            {notice ? <Notice tone="success">{notice}</Notice> : null}
+              <AuthField
+                icon={Mail}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                keyboardType="email-address"
+                textContentType="emailAddress"
+                returnKeyType={isForgot ? 'send' : 'next'}
+                submitBehavior={isForgot ? undefined : 'submit'}
+                onSubmitEditing={() => (isForgot ? submit() : passwordRef.current?.focus())}
+              />
 
-            {isForgot ? (
-              /* Forgot password flow */
-              <>
-                <View style={{ gap: 6 }}>
-                  <Text variant="small" weight="semibold">
-                    Email address
-                  </Text>
-                  <TextField
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="you@example.com"
+              {!isForgot ? (
+                <Animated.View entering={FadeInDown.duration(240)} exiting={FadeOutUp.duration(160)}>
+                  <AuthField
+                    ref={passwordRef}
+                    icon={Lock}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder={isSignUp ? 'Password (6+ characters)' : 'Password'}
+                    secureTextEntry={!showPassword}
                     autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="email"
-                    keyboardType="email-address"
-                    textContentType="emailAddress"
-                    returnKeyType="done"
-                    onSubmitEditing={handleForgotPassword}
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    textContentType={isSignUp ? 'newPassword' : 'password'}
+                    returnKeyType={isSignUp ? 'next' : 'go'}
+                    submitBehavior={isSignUp ? 'submit' : undefined}
+                    onSubmitEditing={() => (isSignUp ? confirmRef.current?.focus() : submit())}
+                    trailing={
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                        onPress={() => setShowPassword((s) => !s)}
+                        hitSlop={8}
+                        style={styles.trailing}
+                      >
+                        {showPassword ? (
+                          <EyeOff size={18} color={colors.fgSubtle} />
+                        ) : (
+                          <Eye size={18} color={colors.fgSubtle} />
+                        )}
+                      </Pressable>
+                    }
                   />
-                </View>
+                </Animated.View>
+              ) : null}
 
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={!canSubmit || busy !== null}
-                  onPress={() => {
-                    haptic.tap();
-                    handleForgotPassword();
-                  }}
-                  style={({ pressed }) => [
-                    styles.button,
-                    {
-                      backgroundColor: pressed ? colors.fgSoft : colors.fg,
-                      opacity: canSubmit && !busy ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  {busy === 'reset' ? (
-                    <ActivityIndicator size="small" color={colors.canvas} />
-                  ) : (
-                    <Mail size={16} color={colors.canvas} />
-                  )}
-                  <Text weight="semibold" color={colors.canvas}>
-                    Send reset link
-                  </Text>
-                </Pressable>
+              {isSignUp ? (
+                <Animated.View entering={FadeInDown.duration(240)} exiting={FadeOutUp.duration(160)} style={{ gap: 6 }}>
+                  <AuthField
+                    ref={confirmRef}
+                    icon={Lock}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm password"
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    textContentType="newPassword"
+                    returnKeyType="go"
+                    invalid={mismatch}
+                    onSubmitEditing={submit}
+                  />
+                  {mismatch ? (
+                    <Text variant="caption" tone="danger" style={{ marginLeft: space.xs }}>
+                      Passwords don’t match yet.
+                    </Text>
+                  ) : null}
+                </Animated.View>
+              ) : null}
 
+              {mode === 'signIn' ? (
                 <Pressable
                   accessibilityRole="button"
                   hitSlop={8}
-                  onPress={() => {
-                    setMode('signIn');
-                    setError(null);
-                    setNotice(null);
-                  }}
-                  style={styles.backButton}
+                  onPress={() => switchMode('forgotPassword')}
+                  style={styles.forgot}
+                >
+                  <Text variant="small" tone="accent" weight="medium">
+                    Forgot password?
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <PrimaryButton label={copy.action} busy={busy} disabled={!canSubmit} onPress={submit} />
+
+              {isForgot ? (
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => switchMode('signIn')}
+                  style={styles.switchRow}
                 >
                   <ArrowLeft size={16} color={colors.accentText} />
                   <Text variant="small" weight="semibold" tone="accent">
                     Back to log in
                   </Text>
                 </Pressable>
-              </>
-            ) : (
-              /* Normal Sign-in / Sign-up flow */
-              <>
-                {isSupabaseConfigured ? (
-                  <>
-                    <View style={{ gap: 6 }}>
-                      <Text variant="small" weight="semibold">
-                        Email
-                      </Text>
-                      <TextField
-                        value={email}
-                        onChangeText={setEmail}
-                        placeholder="you@example.com"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        autoComplete="email"
-                        keyboardType="email-address"
-                        textContentType="emailAddress"
-                        returnKeyType="next"
-                        onSubmitEditing={() => passwordRef.current?.focus()}
-                        submitBehavior="submit"
-                      />
-                    </View>
-
-                    <View style={{ gap: 6 }}>
-                      <View style={styles.labelRow}>
-                        <Text variant="small" weight="semibold">
-                          Password
-                        </Text>
-                        {!isSignUp ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            hitSlop={8}
-                            onPress={() => {
-                              setMode('forgotPassword');
-                              setError(null);
-                              setNotice(null);
-                            }}
-                          >
-                            <Text variant="small" tone="accent" weight="medium">
-                              Forgot password?
-                            </Text>
-                          </Pressable>
-                        ) : null}
-                      </View>
-                      <View>
-                        <TextField
-                          ref={passwordRef}
-                          value={password}
-                          onChangeText={setPassword}
-                          placeholder={isSignUp ? 'At least 6 characters' : '••••••••'}
-                          secureTextEntry={!showPassword}
-                          autoCapitalize="none"
-                          autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                          textContentType={isSignUp ? 'newPassword' : 'password'}
-                          returnKeyType={isSignUp ? 'next' : 'go'}
-                          onSubmitEditing={() => (isSignUp ? confirmRef.current?.focus() : submit())}
-                          submitBehavior={isSignUp ? 'submit' : undefined}
-                          style={{ paddingRight: 44 }}
-                        />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                          onPress={() => setShowPassword((s) => !s)}
-                          hitSlop={8}
-                          style={styles.eye}
-                        >
-                          {showPassword ? (
-                            <EyeOff size={18} color={colors.fgSubtle} />
-                          ) : (
-                            <Eye size={18} color={colors.fgSubtle} />
-                          )}
-                        </Pressable>
-                      </View>
-                    </View>
-
-                    {isSignUp ? (
-                      <View style={{ gap: 6 }}>
-                        <Text variant="small" weight="semibold">
-                          Confirm password
-                        </Text>
-                        <TextField
-                          ref={confirmRef}
-                          value={confirmPassword}
-                          onChangeText={setConfirmPassword}
-                          placeholder="Re-enter your password"
-                          secureTextEntry={!showPassword}
-                          autoCapitalize="none"
-                          autoComplete="new-password"
-                          textContentType="newPassword"
-                          returnKeyType="go"
-                          invalid={mismatch}
-                          onSubmitEditing={submit}
-                        />
-                        {mismatch ? (
-                          <Text variant="caption" tone="danger">
-                            Passwords don’t match yet.
-                          </Text>
-                        ) : null}
-                      </View>
-                    ) : null}
-
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: !canSubmit || busy !== null, busy: busy === 'auth' }}
-                      disabled={!canSubmit || busy !== null}
-                      onPress={() => {
-                        haptic.tap();
-                        submit();
-                      }}
-                      style={({ pressed }) => [
-                        styles.button,
-                        {
-                          backgroundColor: pressed ? colors.fgSoft : colors.fg,
-                          opacity: canSubmit ? 1 : 0.5,
-                        },
-                      ]}
-                    >
-                      {busy === 'auth' ? <ActivityIndicator size="small" color={colors.canvas} /> : null}
-                      <Text weight="semibold" color={colors.canvas}>
-                        {isSignUp ? 'Create account' : 'Log in'}
-                      </Text>
-                    </Pressable>
-
-                    <View style={styles.toggle}>
-                      <Text variant="small" tone="muted">
-                        {isSignUp ? 'Already have an account?' : 'Don’t have an account?'}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        hitSlop={8}
-                        onPress={() => {
-                          setMode(isSignUp ? 'signIn' : 'signUp');
-                          setConfirmPassword('');
-                          setError(null);
-                          setNotice(null);
-                        }}
-                      >
-                        <Text variant="small" weight="bold" style={{ textDecorationLine: 'underline' }}>
-                          {isSignUp ? 'Log in' : 'Sign up'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </>
-                ) : (
-                  <Text variant="caption" tone="subtle" center>
-                    Accounts aren’t set up on this build.
+              ) : (
+                <View style={styles.switchRow}>
+                  <Text variant="small" tone="muted">
+                    {isSignUp ? 'Already have an account?' : 'New to Neri?'}
                   </Text>
-                )}
-              </>
-            )}
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Server ${config.apiUrl}. Change server address`}
-            onPress={() => setServerOpen(true)}
-            hitSlop={8}
-            style={styles.server}
-          >
-            <Server size={12} color={colors.fgSubtle} />
-            <Text variant="caption" tone="subtle" numberOfLines={1}>
-              Server: <Text variant="caption" tone="accent">{config.apiUrl}</Text>
-            </Text>
-          </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={() => switchMode(isSignUp ? 'signIn' : 'signUp')}
+                  >
+                    <Text variant="small" weight="semibold" tone="accent">
+                      {isSignUp ? 'Log in' : 'Create an account'}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </Animated.View>
+          ) : (
+            <Animated.View entering={enter(2)} style={styles.form}>
+              <Text variant="caption" tone="subtle" center>
+                Accounts aren’t set up on this build.
+              </Text>
+            </Animated.View>
+          )}
         </View>
       </KeyboardScrollView>
-
-      {serverOpen ? (
-        <ServerUrlSheet visible onClose={() => setServerOpen(false)} onSaved={() => setServerVersion((v) => v + 1)} />
-      ) : null}
     </KeyboardAvoider>
   );
 }
 
+/* ---------- Pieces ---------- */
+
+/** Soft brand-coloured light behind the logo that slowly breathes. */
+function Glow() {
+  const { colors, scheme } = useTheme();
+  const reduced = useReducedMotion();
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    if (reduced) return;
+    pulse.set(withRepeat(withTiming(1, { duration: 4200, easing: Easing.inOut(Easing.sin) }), -1, true));
+  }, [reduced, pulse]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.75 + pulse.value * 0.25,
+    transform: [{ scale: 1 + pulse.value * 0.06 }],
+  }));
+
+  return (
+    <Animated.View pointerEvents="none" style={[styles.glow, style]} entering={FadeIn.duration(900)}>
+      <Svg width="100%" height="100%">
+        <Defs>
+          <RadialGradient id="glow" cx="50%" cy="38%" r="55%">
+            <Stop offset="0" stopColor={colors.accent} stopOpacity={scheme === 'dark' ? 0.3 : 0.16} />
+            <Stop offset="1" stopColor={colors.accent} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Rect width="100%" height="100%" fill="url(#glow)" />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/** Text input with a leading icon and an accent border while focused. */
+function AuthField({
+  icon: Icon,
+  trailing,
+  invalid,
+  ref,
+  onFocus,
+  onBlur,
+  ...props
+}: React.ComponentProps<typeof TextField> & { icon: LucideIcon; trailing?: React.ReactNode }) {
+  const { colors } = useTheme();
+  const [focused, setFocused] = useState(false);
+  return (
+    <View>
+      <TextField
+        ref={ref}
+        invalid={invalid}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
+        style={[
+          styles.input,
+          { backgroundColor: colors.subtle, paddingRight: trailing ? 46 : space.md + 2 },
+          focused && !invalid ? { borderColor: colors.accent, backgroundColor: colors.surface } : null,
+        ]}
+        {...props}
+      />
+      <View pointerEvents="none" style={styles.leading}>
+        <Icon size={18} color={focused ? colors.accent : colors.fgSubtle} />
+      </View>
+      {trailing}
+    </View>
+  );
+}
+
+/** Brand button that dips slightly under the finger. */
+function PrimaryButton({
+  label,
+  busy,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const scale = useSharedValue(1);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const inactive = disabled || busy;
+
+  return (
+    <Animated.View style={style}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ disabled: inactive, busy }}
+        disabled={inactive}
+        onPress={onPress}
+        onPressIn={() => {
+          scale.set(withSpring(0.97, { damping: 18, stiffness: 400 }));
+        }}
+        onPressOut={() => {
+          scale.set(withSpring(1, { damping: 14, stiffness: 300 }));
+        }}
+        style={({ pressed }) => [
+          styles.button,
+          {
+            backgroundColor: pressed ? colors.accentPressed : colors.accent,
+            opacity: disabled && !busy ? 0.45 : 1,
+          },
+        ]}
+      >
+        {busy ? <ActivityIndicator size="small" color={colors.accentFg} /> : null}
+        <Text weight="semibold" color={colors.accentFg}>
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** Shakes its child whenever `trigger` changes (e.g. a new error message). */
+function Shake({ trigger, children }: { trigger: unknown; children: React.ReactNode }) {
+  const reduced = useReducedMotion();
+  const x = useSharedValue(0);
+
+  useEffect(() => {
+    haptic.warning();
+    if (reduced) return;
+    const t = { duration: 55 };
+    x.set(withSequence(withTiming(-8, t), withTiming(8, t), withTiming(-5, t), withTiming(5, t), withTiming(0, t)));
+  }, [trigger, reduced, x]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+  return (
+    <Animated.View entering={FadeIn.duration(180)} style={style}>
+      {children}
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, paddingHorizontal: space.lg },
-  inner: { width: '100%', maxWidth: 460, alignSelf: 'center' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.lg },
+  content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: space.xl },
+  inner: { width: '100%', maxWidth: 420, alignSelf: 'center' },
+  glow: { position: 'absolute', top: 0, left: 0, right: 0, height: 520 },
+  logo: { alignSelf: 'center' },
+  heading: { marginTop: space.xl },
+  form: { marginTop: space.xxxl, gap: space.md },
+  input: { minHeight: 52, borderRadius: radius.lg, paddingLeft: 46 },
+  leading: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 46, alignItems: 'center', justifyContent: 'center' },
+  trailing: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 46, alignItems: 'center', justifyContent: 'center' },
+  forgot: { alignSelf: 'flex-end', marginTop: -space.xs },
   button: {
-    height: 48,
-    borderRadius: radius.md,
+    height: 52,
+    borderRadius: radius.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
+    marginTop: space.xs,
   },
-  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  eye: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 44, alignItems: 'center', justifyContent: 'center' },
-  backButton: {
+  switchRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
     gap: space.xs,
     paddingVertical: space.sm,
-  },
-  toggle: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: space.xs, marginTop: space.xs },
-  server: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.xs,
-    marginTop: space.xxl,
-    alignSelf: 'center',
-    maxWidth: '100%',
   },
 });

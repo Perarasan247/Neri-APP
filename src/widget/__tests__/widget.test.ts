@@ -3,6 +3,10 @@
  * page/state through the library's own tree builder (the same validation that
  * runs before Android draws the widget).
  */
+import { renderNeriWidget } from '../NeriWidget';
+import { applyAction, applyQueue, DEFAULT_VIEW_STATE, type WidgetAction, type WidgetSnapshot } from '../store';
+
+// Hoisted above the imports by Jest: the widget library only needs a few React Native stubs
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
   NativeModules: {},
@@ -11,10 +15,11 @@ jest.mock('react-native', () => ({
   StyleSheet: { create: (s: unknown) => s },
 }));
 
-import { buildWidgetTree } from 'react-native-android-widget/lib/commonjs/api/build-widget-tree';
-
-import { renderNeriWidget } from '../NeriWidget';
-import { applyAction, applyQueue, DEFAULT_VIEW_STATE, type WidgetAction, type WidgetSnapshot } from '../store';
+// Internal module (not part of the package's public types)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { buildWidgetTree } = require('react-native-android-widget/lib/commonjs/api/build-widget-tree') as {
+  buildWidgetTree: (element: unknown) => any;
+};
 
 const NOW = '2026-11-01';
 

@@ -165,6 +165,10 @@ export interface RankedHabit {
   eligible_days: number;
   completed_count: number;
   missed_count: number;
+  /** Cut-back habits: slips logged in the range (a day can have several). */
+  total_slips?: number;
+  /** Cut-back habits: days in the range with at least one slip. */
+  slip_days?: number;
   completion_rate: number;
   current_streak: number;
   longest_streak: number;

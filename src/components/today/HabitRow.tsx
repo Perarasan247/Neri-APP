@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Flame, MessageSquare, Minus, MoreHorizontal, NotebookPen, Plus } from 'lucide-react-native';
 
 import type { TodayItem } from '@/api/types';
-import { Badge, Button, Checkbox, HabitTile, IconButton, ProgressRing, Text } from '@/components/ui';
+import { Badge, Checkbox, HabitTile, IconButton, ProgressRing, Text } from '@/components/ui';
 import { describeSchedule } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -18,6 +18,8 @@ interface HabitRowProps {
   onMenu: () => void;
   /** Yes/No habit that tracks a value: open the log sheet. */
   onLog?: () => void;
+  /** Cut-back habit: open the "how many slips?" sheet. */
+  onSetSlips?: () => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface HabitRowProps {
  * or schedule, category, note) and a type-specific control on the right.
  * Tap toggles yes/no habits; long-press or "…" opens the action menu.
  */
-export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, onMenu, onLog }: HabitRowProps) {
+export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, onMenu, onLog, onSetSlips }: HabitRowProps) {
   const { colors } = useTheme();
   const { habit, status, count, current_streak, is_skipped, skip_reason, weekly_progress, note } = item;
   const target = item.daily_target || 0;
@@ -131,13 +133,27 @@ export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, on
       </View>
     );
   } else {
+    // Cut-back habit: a day can hold several slips, so +/- with a tap-to-type total
     control = (
-      <Button
-        title={count > 0 ? 'Undo slip' : 'Log slip'}
-        size="sm"
-        variant="secondary"
-        onPress={() => onIncrement(count > 0 ? -1 : 1)}
-      />
+      <View style={[styles.stepper, { borderColor: colors.lineStrong, backgroundColor: colors.surface }]}>
+        <IconButton label="Remove a slip" size={30} disabled={count <= 0} onPress={() => onIncrement(-1)}>
+          <Minus size={16} color={count <= 0 ? colors.fgSubtle : colors.fgSoft} />
+        </IconButton>
+        <Pressable
+          onPress={onSetSlips}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={`${count} slip${count === 1 ? '' : 's'}. Set an exact number`}
+          style={styles.slipCount}
+        >
+          <Text weight="semibold" tabular tone={count > 0 ? 'warning' : 'muted'}>
+            {count}
+          </Text>
+        </Pressable>
+        <IconButton label="Log a slip" size={30} onPress={() => onIncrement(1)}>
+          <Plus size={16} color={colors.fgSoft} />
+        </IconButton>
+      </View>
     );
   }
 
@@ -224,4 +240,5 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   ringText: { fontSize: 11, lineHeight: 13 },
+  slipCount: { minWidth: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
 });

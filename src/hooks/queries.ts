@@ -113,10 +113,40 @@ export function useIncrementHabit() {
     mutationFn: (v: { habitId: string; date: string; delta: number }) => api.incrementLog(v.habitId, v.date, v.delta),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ['today'] });
-      const rollback = patchToday(qc, v.date, (d) => ({
-        ...d,
-        items: d.items.map((i) => (i.habit.id === v.habitId ? { ...i, count: Math.max(0, i.count + v.delta) } : i)),
-      }));
+      const rollback = patchToday(qc, v.date, (d) =>
+        recount({
+          ...d,
+          items: d.items.map((i) => {
+            if (i.habit.id !== v.habitId) return i;
+            const count = Math.max(0, i.count + v.delta);
+            // Cut-back habits are "done" (clean) only while there are no slips
+            return i.habit.type === 'avoid_count' ? { ...i, count, status: count > 0 ? 'not_done' : 'done' } : { ...i, count };
+          }),
+        }),
+      );
+      return { rollback };
+    },
+    onError: (_e, _v, ctx) => ctx?.rollback(),
+    onSettled: () => invalidateHabitData(qc),
+  });
+}
+
+/** Cut-back habit: set the day's slip count to an exact number (0 = a clean day again). */
+export function useSetSlips() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { habitId: string; date: string; count: number }) =>
+      api.upsertLog({ habit_id: v.habitId, log_date: v.date, count: v.count, status: 'done' }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ['today'] });
+      const rollback = patchToday(qc, v.date, (d) =>
+        recount({
+          ...d,
+          items: d.items.map((i) =>
+            i.habit.id === v.habitId ? { ...i, count: v.count, status: v.count > 0 ? 'not_done' : 'done' } : i,
+          ),
+        }),
+      );
       return { rollback };
     },
     onError: (_e, _v, ctx) => ctx?.rollback(),

@@ -274,6 +274,13 @@ function ProgressTile({ habit: h, onPress }: { habit: RankedHabit; onPress: () =
         <Text variant="small" tone="subtle">{` / ${h.eligible_days}${h.streak_unit === 'day' ? '' : ` ${h.streak_unit}s`}`}</Text>
       </Text>
       <ProgressBar value={h.completion_rate} color={h.color} />
+      {h.type === 'avoid_count' && h.total_slips !== undefined ? (
+        <Text variant="caption" weight="medium" tone={h.total_slips ? 'warning' : 'success'} tabular numberOfLines={1}>
+          {h.total_slips
+            ? `${h.total_slips} slip${h.total_slips === 1 ? '' : 's'} · ${h.slip_days} day${h.slip_days === 1 ? '' : 's'}`
+            : 'No slips'}
+        </Text>
+      ) : null}
       <View style={styles.tileFoot}>
         <View style={styles.streak}>
           <Flame size={12} color={colors.p2} />

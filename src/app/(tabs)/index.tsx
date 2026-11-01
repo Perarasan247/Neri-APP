@@ -25,6 +25,7 @@ import { useDayPicker } from '@/components/today/DayPicker';
 import { HabitRow } from '@/components/today/HabitRow';
 import { NoteSheet } from '@/components/today/NoteSheet';
 import { SkipSheet } from '@/components/today/SkipSheet';
+import { SlipSheet } from '@/components/today/SlipSheet';
 import { SummaryCard } from '@/components/today/SummaryCard';
 import { ValueSheet } from '@/components/today/ValueSheet';
 import {
@@ -51,6 +52,7 @@ import {
   useDeleteHabit,
   useIncrementHabit,
   useRestDay,
+  useSetSlips,
   useToday,
   useTodos,
   useToggleHabit,
@@ -83,6 +85,7 @@ export default function TodayScreen() {
 
   const toggleHabit = useToggleHabit();
   const incrementHabit = useIncrementHabit();
+  const setSlips = useSetSlips();
   const upsertLog = useUpsertLog();
   const addValue = useAddValue();
   const restDay = useRestDay();
@@ -96,6 +99,7 @@ export default function TodayScreen() {
   const [noteItem, setNoteItem] = useState<TodayItem | null>(null);
   const [valueItem, setValueItem] = useState<TodayItem | null>(null);
   const [doneItem, setDoneItem] = useState<TodayItem | null>(null);
+  const [slipItem, setSlipItem] = useState<TodayItem | null>(null);
 
   const onError = (e: Error) => toast(e.message, { tone: 'danger' });
 
@@ -161,6 +165,24 @@ export default function TodayScreen() {
     // Logging an amount also counts as doing the habit; with no amount it's a plain mark done
     if (value) addValue.mutate({ habitId: doneItem.habit.id, date: viewDate, value }, close);
     else toggleHabit.mutate({ habitId: doneItem.habit.id, date: viewDate, done: true }, close);
+  };
+
+  const handleSaveSlips = (count: number) => {
+    if (!slipItem) return;
+    if (count > slipItem.count) haptic.warning();
+    else haptic.tap();
+    setSlips.mutate(
+      { habitId: slipItem.habit.id, date: viewDate, count },
+      {
+        onSuccess: () => {
+          setSlipItem(null);
+          toast(count === 0 ? 'Marked as a clean day' : `${count} slip${count === 1 ? '' : 's'} logged`, {
+            tone: count === 0 ? 'success' : 'default',
+          });
+        },
+        onError,
+      },
+    );
   };
 
   const handleSaveNote = (note: string) => {
@@ -233,8 +255,8 @@ export default function TodayScreen() {
     if (item.habit.metric_label && !item.is_skipped) {
       opts.push({ label: `Log ${item.habit.metric_label.toLowerCase()}`, icon: icon(NotebookPen), onPress: () => setValueItem(item) });
     }
-    if (item.habit.type === 'avoid_count' && item.count > 0 && !item.is_skipped) {
-      opts.push({ label: 'Log another slip', icon: icon(Plus), onPress: () => handleIncrement(item, 1) });
+    if (item.habit.type === 'avoid_count' && !item.is_skipped) {
+      opts.push({ label: 'Set number of slips', icon: icon(Plus), onPress: () => setSlipItem(item) });
     }
     // A note on a clean avoid day keeps it clean: the log stays at 0 slips
     opts.push({ label: item.note ? 'Edit note' : 'Add note', icon: icon(MessageSquare), onPress: () => setNoteItem(item) });
@@ -429,6 +451,7 @@ export default function TodayScreen() {
                   item={item}
                   onToggle={() => handleToggle(item)}
                   onIncrement={(d) => handleIncrement(item, d)}
+                  onSetSlips={() => setSlipItem(item)}
                   onLog={item.habit.metric_label ? () => setValueItem(item) : undefined}
                   onMenu={() => {
                     haptic.light();
@@ -540,6 +563,15 @@ export default function TodayScreen() {
         total={valueItem?.metric_total}
         loading={addValue.isPending}
         onSave={handleSaveValue}
+      />
+
+      <SlipSheet
+        visible={slipItem !== null}
+        onClose={() => setSlipItem(null)}
+        habitName={slipItem?.habit.name}
+        count={slipItem?.count}
+        loading={setSlips.isPending}
+        onSave={handleSaveSlips}
       />
 
       <NoteSheet
