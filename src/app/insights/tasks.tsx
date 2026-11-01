@@ -5,7 +5,7 @@ import { CheckCircle2 } from 'lucide-react-native';
 
 import type { TodoPriority, TodoRecentCompletedItem } from '@/api/types';
 import { AreaChart, BarChart, BarList, Legend } from '@/components/charts';
-import { ChartCard } from '@/components/insights/ChartCard';
+import { ChartCard, INSIGHTS_ROUTES } from '@/components/insights/ChartCard';
 import { halfSumChange } from '@/components/insights/halves';
 import { InsightsSkeleton } from '@/components/insights/InsightsSkeleton';
 import { RangeControl, useInsightsRange } from '@/components/insights/RangeControl';
@@ -49,12 +49,13 @@ export default function TaskInsightsScreen() {
       <Stack.Screen options={{ title: 'Task insights' }} />
 
       <View style={{ gap: space.lg }}>
-        <Segmented<'habits' | 'tasks'>
+        <Segmented<'habits' | 'tasks' | 'goals'>
           value="tasks"
-          onChange={(v) => v === 'habits' && router.replace('/insights')}
+          onChange={(v) => v !== 'tasks' && router.replace(INSIGHTS_ROUTES[v])}
           options={[
             { value: 'habits', label: 'Habits' },
             { value: 'tasks', label: 'Tasks' },
+            { value: 'goals', label: 'Goals' },
           ]}
         />
         <RangeControl state={rangeState} />

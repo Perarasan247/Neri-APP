@@ -5,7 +5,7 @@ import { BarChart3, CalendarRange, Flame } from 'lucide-react-native';
 
 import type { RankedHabit, TrendPoint } from '@/api/types';
 import { AreaChart, BarChart, BarList } from '@/components/charts';
-import { ChartCard } from '@/components/insights/ChartCard';
+import { ChartCard, INSIGHTS_ROUTES } from '@/components/insights/ChartCard';
 import { halfRateChange } from '@/components/insights/halves';
 import { InsightsSkeleton } from '@/components/insights/InsightsSkeleton';
 import { RangeControl, useInsightsRange } from '@/components/insights/RangeControl';
@@ -52,12 +52,13 @@ export default function HabitInsightsScreen() {
       <Stack.Screen options={{ title: 'Habit insights' }} />
 
       <View style={{ gap: space.lg }}>
-        <Segmented<'habits' | 'tasks'>
+        <Segmented<'habits' | 'tasks' | 'goals'>
           value="habits"
-          onChange={(v) => v === 'tasks' && router.replace('/insights/tasks')}
+          onChange={(v) => v !== 'habits' && router.replace(INSIGHTS_ROUTES[v])}
           options={[
             { value: 'habits', label: 'Habits' },
             { value: 'tasks', label: 'Tasks' },
+            { value: 'goals', label: 'Goals' },
           ]}
         />
         <RangeControl state={rangeState} />

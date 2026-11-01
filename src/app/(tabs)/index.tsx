@@ -20,6 +20,7 @@ import {
 } from 'lucide-react-native';
 
 import type { TodayItem } from '@/api/types';
+import { TodayGoalsStrip } from '@/components/goals/TodayGoalsStrip';
 import { TaskRow } from '@/components/tasks/TaskRow';
 import { useDayPicker } from '@/components/today/DayPicker';
 import { HabitRow } from '@/components/today/HabitRow';
@@ -391,6 +392,8 @@ export default function TodayScreen() {
           tasksTotal={todos.length}
           tasksOverdue={openOverdue.length}
         />
+
+        {data.is_today ? <TodayGoalsStrip /> : null}
 
         {data.is_whole_day_skip ? (
           <Notice

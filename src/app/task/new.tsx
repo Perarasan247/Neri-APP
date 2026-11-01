@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowUp, Calendar, CalendarX, CalendarDays, ChevronDown, Clock, Flag, Hash, Repeat as RepeatIcon, X } from 'lucide-react-native';
+import { ArrowUp, Calendar, CalendarX, CalendarDays, ChevronDown, Clock, Flag, Hash, Repeat as RepeatIcon, Target, X } from 'lucide-react-native';
 
 import type { Repeat, TodoPriority } from '@/api/types';
 import {
@@ -26,6 +26,7 @@ import {
   useToast,
   type MenuOption,
 } from '@/components/ui';
+import { GoalPickerSheet, useLinkableGoals } from '@/components/goals/GoalPickerSheet';
 import { CategoryPicker } from '@/components/tasks/CategoryPicker';
 import { usePickers } from '@/components/tasks/DatePickerSheet';
 import { RepeatSheet } from '@/components/tasks/RepeatSheet';
@@ -47,6 +48,9 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { font, radius, space } from '@/theme/tokens';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Keep long goal titles from stretching the toolbar chip. */
+const clip = (t: string, n = 22) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 
 const CHIP_ICONS: Record<ChipType, typeof Calendar> = {
   date: Calendar,
@@ -70,7 +74,7 @@ export default function NewTaskScreen() {
   const create = useCreateTodo();
   const all = useTodos({});
   const { height: windowHeight } = useWindowDimensions();
-  const params = useLocalSearchParams<{ date?: string; time?: string }>();
+  const params = useLocalSearchParams<{ date?: string; time?: string; goal?: string }>();
   const ref = today();
 
   const [text, setText] = useState('');
@@ -83,11 +87,15 @@ export default function NewTaskScreen() {
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [repeat, setRepeat] = useState<Repeat | null>(null);
   const [ignored, setIgnored] = useState<ReadonlySet<ChipType>>(new Set());
+  // Opened from a goal ("Add a task") the task starts linked to it
+  const [goalId, setGoalId] = useState<string | null>(params.goal || null);
+  const goals = useLinkableGoals(goalId);
 
   const dateSheet = useDisclosure();
   const prioritySheet = useDisclosure();
   const categorySheet = useDisclosure();
   const repeatSheet = useDisclosure();
+  const goalSheet = useDisclosure();
 
   const parsed = parseQuickAdd(text, ignored);
   const has = (type: ChipType) => parsed.chips.some((c) => c.type === type);
@@ -150,6 +158,7 @@ export default function NewTaskScreen() {
         priority: effPriority,
         category: effCategory,
         repeat: effRepeat ?? undefined,
+        goal_id: goalId ?? undefined,
       },
       {
         onSuccess: () => {
@@ -321,6 +330,13 @@ export default function NewTaskScreen() {
             icon={<RepeatIcon size={14} color={effRepeat ? colors.accentText : colors.fgMuted} />}
             onPress={repeatSheet.show}
           />
+          <Chip
+            label={goalId ? clip(goals.linked?.title ?? 'Goal') : 'Goal'}
+            selected={!!goalId}
+            color={goals.linked?.color}
+            icon={<Target size={14} color={goalId ? (goals.linked?.color ?? colors.accentText) : colors.fgMuted} />}
+            onPress={goalSheet.show}
+          />
         </ScrollView>
 
         <View style={[styles.footer, { borderTopColor: colors.line }]}>
@@ -393,6 +409,15 @@ export default function NewTaskScreen() {
           setRepeat(r);
           if (r && !dueDate) setDate(ref);
         }}
+      />
+      <GoalPickerSheet
+        visible={goalSheet.open}
+        onClose={goalSheet.hide}
+        sections={goals.sections}
+        value={goalId}
+        loading={goals.loading}
+        emptyHint="No active goals this week, month or year. Set one from Browse → Goals."
+        onSelect={(g) => setGoalId(g?.id ?? null)}
       />
       {pickers.sheet}
     </View>

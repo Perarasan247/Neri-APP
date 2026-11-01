@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { ServerUrlSheet } from '@/components/account/ServerUrlSheet';
+import { GoalPromptHost } from '@/components/goals/GoalPromptHost';
 import { Button, DialogProvider, ErrorState, Text, ToastProvider, useDisclosure } from '@/components/ui';
 import { useProfile } from '@/hooks/queries';
 import { SessionProvider, useSession } from '@/hooks/session';
@@ -102,6 +103,7 @@ function AppNavigator() {
   return (
     <NavThemeProvider value={navTheme}>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      {signedIn && onboarded ? <GoalPromptHost /> : null}
       <Stack
         screenOptions={{
           headerShadowVisible: false,
@@ -140,6 +142,11 @@ function AppNavigator() {
           <Stack.Screen name="habit/[id]/edit" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="insights/index" options={{ title: 'Habit insights' }} />
           <Stack.Screen name="insights/tasks" options={{ title: 'Task insights' }} />
+          <Stack.Screen name="insights/goals" options={{ title: 'Goal insights' }} />
+          <Stack.Screen name="goals" options={{ title: 'Goals' }} />
+          <Stack.Screen name="goal/new" options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="goal/[id]/index" options={{ title: '' }} />
+          <Stack.Screen name="goal/[id]/edit" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="archived" options={{ title: 'Archived habits' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         </Stack.Protected>

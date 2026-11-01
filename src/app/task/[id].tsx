@@ -16,6 +16,7 @@ import {
   Repeat as RepeatIcon,
   RotateCcw,
   Sun,
+  Target,
   Timer,
   Trash2,
 } from 'lucide-react-native';
@@ -39,6 +40,7 @@ import {
   useToast,
   type MenuOption,
 } from '@/components/ui';
+import { GoalPickerSheet, useLinkableGoals } from '@/components/goals/GoalPickerSheet';
 import { CategoryPicker } from '@/components/tasks/CategoryPicker';
 import { usePickers } from '@/components/tasks/DatePickerSheet';
 import { RepeatSheet } from '@/components/tasks/RepeatSheet';
@@ -116,6 +118,8 @@ function TaskDetail({ todo }: { todo: Todo }) {
   const categorySheet = useDisclosure();
   const repeatSheet = useDisclosure();
   const deleteSheet = useDisclosure();
+  const goalSheet = useDisclosure();
+  const goals = useLinkableGoals(todo.goal_id);
 
   const ref = today();
   const done = todo.status === 'completed';
@@ -427,6 +431,14 @@ function TaskDetail({ todo }: { todo: Todo }) {
           onPress={categorySheet.show}
         />
         <Divider inset={48} />
+        <DetailRow
+          icon={<Target size={18} color={goals.linked ? goals.linked.color : colors.fgMuted} />}
+          label="Goal"
+          value={todo.goal_id ? (goals.linked?.title ?? 'Linked') : 'None'}
+          valueColor={goals.linked ? colors.fgSoft : undefined}
+          onPress={goalSheet.show}
+        />
+        <Divider inset={48} />
         <View style={styles.detailRow}>
           <View style={styles.detailIcon}>
             <MapPin size={18} color={colors.fgMuted} />
@@ -552,6 +564,15 @@ function TaskDetail({ todo }: { todo: Todo }) {
         categories={categories}
         value={todo.category}
         onSelect={(c) => save({ category: c })}
+      />
+      <GoalPickerSheet
+        visible={goalSheet.open}
+        onClose={goalSheet.hide}
+        sections={goals.sections}
+        value={todo.goal_id}
+        loading={goals.loading}
+        emptyHint="No active goals this week, month or year. Set one from Browse → Goals."
+        onSelect={(g) => save({ goal_id: g?.id ?? null })}
       />
       {pickers.sheet}
     </Screen>

@@ -4,10 +4,12 @@
  * everywhere. Add new endpoints here, never call `api.*` from a screen.
  */
 import { useSyncExternalStore } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import * as api from '@/api/endpoints';
-import type { Habit, MonthlyData, RepeatScope, Subtask, Todo, TodayData } from '@/api/types';
+import type { Goal, GoalCurrent, GoalDetail, GoalLevel, Habit, MonthlyData, RepeatScope, Subtask, Todo, TodayData } from '@/api/types';
+import { pushGoalPrompt } from '@/lib/goalPrompts';
+import { applyGoalPatch, isValidParent, parentCandidatePeriods } from '@/lib/goals';
 
 /* ---------- Keys ---------- */
 
@@ -20,7 +22,17 @@ export const qk = {
   habitInsights: (id: string, r: api.InsightsRange) => ['insights', 'habit', id, r] as const,
   todos: (q: api.TodoQuery = {}) => ['todos', q] as const,
   todoInsights: (r: api.InsightsRange) => ['todos-insights', r] as const,
+  // Everything goal-related lives under 'goals' so one invalidation refreshes it all
+  goals: (q: api.GoalQuery = {}) => ['goals', 'list', q] as const,
+  goalsCurrent: ['goals', 'current'] as const,
+  goal: (id: string) => ['goals', 'detail', id] as const,
+  goalInsights: (r: api.InsightsRange) => ['goals', 'insights', r] as const,
 };
+
+/** Goal progress is derived from tasks and habit logs, so it refreshes whenever they change. */
+function invalidateGoalData(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['goals'] });
+}
 
 /** Anything derived from habit logs, skips or schedules. */
 function invalidateHabitData(qc: QueryClient) {
@@ -28,11 +40,13 @@ function invalidateHabitData(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['month'] });
   qc.invalidateQueries({ queryKey: ['habits'] });
   qc.invalidateQueries({ queryKey: ['insights'] });
+  invalidateGoalData(qc);
 }
 
 function invalidateTodoData(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['todos'] });
   qc.invalidateQueries({ queryKey: ['todos-insights'] });
+  invalidateGoalData(qc);
 }
 
 /* ---------- Profile ---------- */
@@ -331,6 +345,8 @@ export function useUpdateTodo() {
       return { rollback: patchTodos(qc, (l) => l.map((t) => (t.id === v.id ? { ...t, ...patch } : t))) };
     },
     onError: (_e, _v, ctx) => ctx?.rollback(),
+    // Completing a linked task (status: 'completed') may ask whether its goal is done too
+    onSuccess: (res) => pushGoalPrompt(res?.goal_prompt),
     onSettled: () => invalidateTodoData(qc),
   });
 }
@@ -348,9 +364,26 @@ export function useToggleTodo() {
           return { ...t, status: completed ? 'completed' : 'pending', completed_at: completed ? new Date().toISOString() : null };
         }),
       );
-      return { rollback };
+      // Goal detail screens list their tasks too: flip the checkbox there straight away
+      const goalRollback = patchGoalDetails(qc, (g) =>
+        g.tasks.some((t) => t.id === id)
+          ? {
+              ...g,
+              tasks: g.tasks.map((t) =>
+                t.id === id ? { ...t, status: t.status === 'completed' ? 'pending' : 'completed' } : t,
+              ),
+            }
+          : g,
+      );
+      return {
+        rollback: () => {
+          rollback();
+          goalRollback();
+        },
+      };
     },
     onError: (_e, _id, ctx) => ctx?.rollback(),
+    onSuccess: (res) => pushGoalPrompt(res?.goal_prompt),
     onSettled: () => invalidateTodoData(qc),
   });
 }
@@ -379,3 +412,115 @@ export function useDeleteTodo() {
 
 export const useTodoInsights = (r: api.InsightsRange) =>
   useQuery({ queryKey: qk.todoInsights(r), queryFn: () => api.getTodoInsights(r), placeholderData: keepPreviousData });
+
+/* ---------- Goals ---------- */
+
+/** Goals for one level and period (or any filter); keeps the old list while the next period loads. */
+export const useGoals = (q: api.GoalQuery = {}, enabled = true) =>
+  useQuery({ queryKey: qk.goals(q), queryFn: () => api.getGoals(q), enabled, placeholderData: keepPreviousData });
+
+/** This week's, month's and year's goals, plus finished periods waiting for a review. */
+export const useCurrentGoals = (enabled = true) =>
+  useQuery({ queryKey: qk.goalsCurrent, queryFn: api.getCurrentGoals, enabled });
+
+export const useGoal = (id?: string) =>
+  useQuery({ queryKey: qk.goal(id ?? ''), queryFn: () => api.getGoal(id!), enabled: Boolean(id) });
+
+/** A goal's id → title lookup from the full goal list (task rows, pickers). Fetches only when needed. */
+export function useGoalLookup(enabled = true) {
+  const q = useQuery({ queryKey: qk.goals({}), queryFn: () => api.getGoals({}), enabled, staleTime: 60_000 });
+  return q.data;
+}
+
+/**
+ * Goals that can hold a goal of `level` in the period starting at `start`: bigger levels whose
+ * period overlaps it (a week spanning two months offers both months). Fetched per period.
+ */
+export function useParentCandidates(level: GoalLevel, start: string, excludeId?: string) {
+  const periods = parentCandidatePeriods(level, start);
+  const results = useQueries({
+    queries: periods.map((p) => {
+      const q: api.GoalQuery = { level: p.level, period: p.period };
+      return { queryKey: qk.goals(q), queryFn: () => api.getGoals(q) };
+    }),
+  });
+  const goals = results
+    .flatMap((r) => r.data ?? [])
+    .filter((g) => g.id !== excludeId && isValidParent(g, level, start));
+  return { goals, loading: results.some((r) => r.isPending) };
+}
+
+export const useGoalInsights = (r: api.InsightsRange) =>
+  useQuery({ queryKey: qk.goalInsights(r), queryFn: () => api.getGoalInsights(r), placeholderData: keepPreviousData });
+
+function patchGoalDetails(qc: QueryClient, fn: (g: GoalDetail) => GoalDetail) {
+  const snapshots = qc.getQueriesData<GoalDetail>({ queryKey: ['goals', 'detail'] });
+  for (const [key, data] of snapshots) if (data) qc.setQueryData(key, fn(data));
+  return () => snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
+}
+
+/** Optimistically apply `fn` to goal `id` wherever it is cached (lists, current, details); returns rollback. */
+function patchGoal(qc: QueryClient, id: string, fn: <T extends Goal>(g: T) => T) {
+  const one = <T extends Goal>(g: T): T => (g.id === id ? fn(g) : g);
+  const many = <T extends Goal>(l: T[]) => l.map(one);
+  const lists = qc.getQueriesData<Goal[]>({ queryKey: ['goals', 'list'] });
+  const current = qc.getQueriesData<GoalCurrent>({ queryKey: qk.goalsCurrent });
+  for (const [key, data] of lists) if (data) qc.setQueryData(key, many(data));
+  for (const [key, data] of current) {
+    if (data)
+      qc.setQueryData<GoalCurrent>(key, {
+        ...data,
+        weekly: many(data.weekly),
+        monthly: many(data.monthly),
+        yearly: many(data.yearly),
+        needs_review: data.needs_review.filter((g) => !(g.id === id && fn(g).status !== 'active')),
+      });
+  }
+  const detailRollback = patchGoalDetails(qc, (g) => ({ ...one(g), children: many(g.children), ancestors: many(g.ancestors) }));
+  return () => {
+    lists.forEach(([key, data]) => qc.setQueryData(key, data));
+    current.forEach(([key, data]) => qc.setQueryData(key, data));
+    detailRollback();
+  };
+}
+
+export function useCreateGoal() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: api.createGoal, onSettled: () => invalidateGoalData(qc) });
+}
+
+export function useUpdateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; patch: api.GoalPatch }) => api.updateGoal(v.id, v.patch),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ['goals'] });
+      return { rollback: patchGoal(qc, v.id, (g) => applyGoalPatch(g, v.patch)) };
+    },
+    onError: (_e, _v, ctx) => ctx?.rollback(),
+    // Completing the last open sub-goal asks about the parent
+    onSuccess: (res) => pushGoalPrompt(res?.parent_prompt),
+    onSettled: () => invalidateGoalData(qc),
+  });
+}
+
+/** Deleting unlinks sub-goals, tasks and habits, so all of them refresh. */
+export function useDeleteGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteGoal(id),
+    onSettled: () => {
+      invalidateTodoData(qc);
+      qc.invalidateQueries({ queryKey: ['habits'] });
+    },
+  });
+}
+
+/** Carry what's left into a later period; open tasks follow the new goal. */
+export function useCarryGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; periodStart?: string }) => api.carryGoal(v.id, v.periodStart),
+    onSettled: () => invalidateTodoData(qc),
+  });
+}

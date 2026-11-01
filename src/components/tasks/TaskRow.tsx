@@ -1,11 +1,11 @@
 import React, { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { Calendar, Clock, ListChecks, MapPin, Repeat } from 'lucide-react-native';
+import { Calendar, Clock, ListChecks, MapPin, Repeat, Target } from 'lucide-react-native';
 
 import type { Todo } from '@/api/types';
 import { Checkbox, Text, useToast } from '@/components/ui';
-import { useToggleTodo } from '@/hooks/queries';
+import { useGoalLookup, useToggleTodo } from '@/hooks/queries';
 import { diffDays, friendlyDate, priorityColor, taskTimeLabel, today } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -28,6 +28,8 @@ export const TaskRow = memo(function TaskRow({ todo, hideDate, hideCategory, var
   const { colors } = useTheme();
   const toggle = useToggleTodo();
   const toast = useToast();
+  // Shared, cached goal list: fetched once, only when some row is linked to a goal
+  const goal = useGoalLookup(!!todo.goal_id)?.find((g) => g.id === todo.goal_id);
 
   const done = todo.status === 'completed';
   const ref = today();
@@ -104,6 +106,14 @@ export const TaskRow = memo(function TaskRow({ todo, hideDate, hideCategory, var
               <ListChecks size={13} color={colors.fgMuted} />
               <Text variant="caption" tone="muted" tabular>
                 {subDone}/{subtasks.length}
+              </Text>
+            </View>
+          ) : null}
+          {goal ? (
+            <View style={[styles.metaItem, { flexShrink: 1, maxWidth: '60%' }]} accessibilityLabel={`Goal: ${goal.title}`}>
+              <Target size={12} color={goal.color} />
+              <Text variant="caption" tone="muted" numberOfLines={1}>
+                {goal.title}
               </Text>
             </View>
           ) : null}

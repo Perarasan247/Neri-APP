@@ -5,8 +5,16 @@
  */
 import { ApiError, request } from './client';
 import type {
+  ChecklistItem,
   DashboardInsights,
   FrequencyType,
+  Goal,
+  GoalCurrent,
+  GoalDetail,
+  GoalInsights,
+  GoalLevel,
+  GoalMeasure,
+  GoalStatus,
   Habit,
   HabitInsights,
   HabitType,
@@ -57,6 +65,7 @@ export interface CreateHabitInput {
   sort_order?: number;
   metric_label?: string;
   metric_unit?: string;
+  goal_id?: string;
   schedule: ScheduleInput;
 }
 
@@ -69,6 +78,8 @@ export interface HabitCosmeticsInput {
   /** Empty string turns value tracking off. */
   metric_label?: string;
   metric_unit?: string;
+  /** Empty string unlinks the goal. */
+  goal_id?: string;
 }
 
 export const getHabits = (status?: 'active' | 'archived') =>
@@ -170,6 +181,7 @@ export interface TodoInput {
   category?: string;
   subtasks?: Subtask[];
   repeat?: Repeat;
+  goal_id?: string;
 }
 
 export const getTodos = (params: TodoQuery = {}) =>
@@ -177,8 +189,8 @@ export const getTodos = (params: TodoQuery = {}) =>
 
 export const createTodo = (body: TodoInput) => request<Todo>('POST', '/todos', { body });
 
-/** `repeat: null` is serialised on purpose: it stops the series. */
-export type TodoPatch = Partial<Omit<Todo, 'repeat'>> & { repeat?: Repeat | null };
+/** `repeat: null` is serialised on purpose: it stops the series. `goal_id: null` unlinks the goal. */
+export type TodoPatch = Partial<Omit<Todo, 'repeat' | 'goal_prompt'>> & { repeat?: Repeat | null };
 
 export const updateTodo = (todoId: string, body: TodoPatch, scope: Exclude<RepeatScope, 'all'> = 'this') =>
   request<Todo>('PATCH', `/todos/${todoId}`, { query: { scope }, body });
@@ -190,5 +202,64 @@ export const deleteTodo = (todoId: string, scope: RepeatScope = 'this') =>
 
 export const getTodoInsights = ({ range, year, startDate, endDate }: InsightsRange) =>
   request<TodoInsightsData>('GET', '/todos/insights/summary', {
+    query: { time_filter: range, year, start_date: startDate, end_date: endDate },
+  });
+
+/* ---------- Goals ---------- */
+
+export interface GoalQuery {
+  level?: GoalLevel;
+  /** Any date inside the period (needs level). */
+  period?: string;
+  status?: GoalStatus | 'open' | 'all';
+}
+
+export interface GoalInput {
+  title: string;
+  level: GoalLevel;
+  /** Any date inside the period; the server snaps it to the period's first day. */
+  period_start: string;
+  description?: string;
+  color?: string;
+  parent_id?: string;
+  measure?: GoalMeasure;
+  target?: number;
+  checklist?: ChecklistItem[];
+}
+
+export interface GoalPatch {
+  title?: string;
+  description?: string | null;
+  color?: string;
+  period_start?: string;
+  /** null or "" unlinks. */
+  parent_id?: string | null;
+  measure?: GoalMeasure;
+  target?: number;
+  manual_progress?: number;
+  checklist?: ChecklistItem[];
+  status?: GoalStatus;
+  ask_on_task_complete?: boolean;
+  sort_order?: number;
+}
+
+export const getGoals = (q: GoalQuery = {}) => request<Goal[]>('GET', '/goals', { query: { ...q } });
+
+export const getCurrentGoals = () => request<GoalCurrent>('GET', '/goals/current');
+
+export const getGoal = (goalId: string) => request<GoalDetail>('GET', `/goals/${goalId}`);
+
+export const createGoal = (body: GoalInput) => request<Goal>('POST', '/goals', { body });
+
+export const updateGoal = (goalId: string, body: GoalPatch) => request<Goal>('PATCH', `/goals/${goalId}`, { body });
+
+export const deleteGoal = (goalId: string) => request<{ message: string }>('DELETE', `/goals/${goalId}`);
+
+/** Move what's left of a goal into a later period (default: the next one). The old goal becomes missed. */
+export const carryGoal = (goalId: string, period_start?: string) =>
+  request<Goal>('POST', `/goals/${goalId}/carry`, { body: period_start ? { period_start } : {} });
+
+export const getGoalInsights = ({ range, year, startDate, endDate }: InsightsRange) =>
+  request<GoalInsights>('GET', '/goals/insights', {
     query: { time_filter: range, year, start_date: startDate, end_date: endDate },
   });

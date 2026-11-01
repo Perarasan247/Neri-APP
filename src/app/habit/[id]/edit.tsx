@@ -23,6 +23,7 @@ import {
   type ScheduleDraft,
 } from '@/components/habits/HabitFormParts';
 import { FormHeader } from '@/components/habits/FormHeader';
+import { GoalLinkField } from '@/components/goals/GoalPickerSheet';
 import { Stepper } from '@/components/habits/Stepper';
 import {
   Button,
@@ -81,6 +82,7 @@ function EditForm({ habit }: { habit: Habit }) {
   const [category, setCategory] = useState(habit.category ?? '');
   const [description, setDescription] = useState(habit.description ?? '');
   const [sortOrder, setSortOrder] = useState(habit.sort_order ?? 0);
+  const [goalId, setGoalId] = useState<string | null>(habit.goal_id ?? null);
   const [logNumber, setLogNumber] = useState(!!habit.metric_label);
   const [schedule, setSchedule] = useState<ScheduleDraft>(original);
   const [effectiveFrom, setEffectiveFrom] = useState(today());
@@ -95,6 +97,7 @@ function EditForm({ habit }: { habit: Habit }) {
     category.trim() !== (habit.category ?? '') ||
     description.trim() !== (habit.description ?? '') ||
     sortOrder !== habit.sort_order ||
+    goalId !== (habit.goal_id ?? null) ||
     (habit.type === 'build_yesno' && logNumber !== !!habit.metric_label);
   const scheduleDirty = habit.type !== 'avoid_count' && scheduleChanged(schedule, original, habit.type);
   const scheduleError = scheduleDirty ? validateSchedule(schedule, habit.type) : null;
@@ -122,6 +125,8 @@ function EditForm({ habit }: { habit: Habit }) {
               category: category.trim() || 'Personal',
               description: description.trim(),
               sort_order: sortOrder,
+              // Empty string unlinks the goal
+              ...(goalId !== (habit.goal_id ?? null) ? { goal_id: goalId ?? '' } : {}),
               ...(habit.type === 'build_yesno' ? { metric_label: logNumber ? (habit.metric_label ?? habit.name) : '' } : {}),
             }
           : undefined,
@@ -272,6 +277,10 @@ function EditForm({ habit }: { habit: Habit }) {
               />
               <CategorySuggestions value={category} suggestions={suggestions} onPick={setCategory} />
             </View>
+          </FormSection>
+
+          <FormSection title="Goal" hint="Optional. The goal this habit helps with.">
+            <GoalLinkField value={goalId} onChange={setGoalId} />
           </FormSection>
 
           <FormSection title="Description">

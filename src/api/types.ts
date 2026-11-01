@@ -33,6 +33,8 @@ export interface Habit {
   /** Optional tracked value with no goal, e.g. "Pages read" / "pages". Yes/No habits only. */
   metric_label?: string | null;
   metric_unit?: string | null;
+  /** The goal this habit serves, if any. */
+  goal_id?: string | null;
   created_at: string;
   periods: HabitPeriod[];
   schedules: HabitSchedule[];
@@ -277,6 +279,10 @@ export interface Todo {
   subtasks: Subtask[];
   series_id?: string | null;
   repeat?: Repeat | null;
+  /** The goal this task serves, if any. */
+  goal_id?: string | null;
+  /** Set on a toggle / PATCH response when completing the task should ask whether its goal is done too. */
+  goal_prompt?: GoalPrompt | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -343,4 +349,177 @@ export interface TodoInsightsData {
   category_breakdown: TodoCategoryItem[];
   weekday_productivity: TodoWeekdayItem[];
   recent_completed: TodoRecentCompletedItem[];
+}
+
+/* ---------- Goals ---------- */
+
+/** A goal belongs to one year, month or Monday-to-Sunday week. */
+export type GoalLevel = 'yearly' | 'monthly' | 'weekly';
+/** simple: progress from sub-goals / tasks / done; target: a number to reach; checklist: ticked items. */
+export type GoalMeasure = 'simple' | 'target' | 'checklist';
+export type GoalStatus = 'active' | 'completed' | 'missed' | 'dropped';
+
+export interface ChecklistItem {
+  id?: string | null;
+  title: string;
+  completed: boolean;
+}
+
+/** "Is this goal done too?" after a linked task or the last sub-goal finished. */
+export interface GoalPrompt {
+  goal_id: string;
+  title: string;
+  level: GoalLevel;
+  period_label: string;
+  reason: 'task_completed' | 'target_reached' | 'children_completed';
+  /** e.g. "5 / 5" */
+  progress_label?: string | null;
+}
+
+export interface GoalLinkedTask {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  due_date?: string | null;
+  priority: TodoPriority;
+  completed_at?: string | null;
+}
+
+export interface GoalLinkedHabit {
+  id: string;
+  name: string;
+  color: string;
+  type: HabitType;
+  status: HabitStatus;
+  /** Days ticked in the goal's period (clean days for cut-back habits). */
+  days_done: number;
+  /** Cut-back habits only. */
+  slips: number;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description?: string | null;
+  color: string;
+  level: GoalLevel;
+  period_start: string;
+  period_end: string;
+  period_label: string;
+  parent_id?: string | null;
+  parent_title?: string | null;
+  parent_level?: GoalLevel | null;
+  measure: GoalMeasure;
+  target?: number | null;
+  manual_progress: number;
+  checklist: ChecklistItem[];
+  status: GoalStatus;
+  completed_at?: string | null;
+  ask_on_task_complete: boolean;
+  carried_from_id?: string | null;
+  carried_to_id?: string | null;
+  sort_order: number;
+  created_at: string;
+  progress_value: number;
+  progress_total: number;
+  /** 0–100 */
+  progress_pct: number;
+  progress_label: string;
+  tasks_total: number;
+  tasks_completed: number;
+  children_total: number;
+  children_completed: number;
+  habits_count: number;
+  /** The period is over and the goal is still active. */
+  needs_review: boolean;
+  /** The period contains today. */
+  is_current: boolean;
+  /** On a PATCH that completed the goal: every sub-goal of its parent is now done. */
+  parent_prompt?: GoalPrompt | null;
+}
+
+export interface GoalDetail extends Goal {
+  children: Goal[];
+  tasks: GoalLinkedTask[];
+  habits: GoalLinkedHabit[];
+  /** Outermost first. */
+  ancestors: Goal[];
+}
+
+export interface GoalCurrent {
+  today: string;
+  week_start: string;
+  month_start: string;
+  year_start: string;
+  weekly: Goal[];
+  monthly: Goal[];
+  yearly: Goal[];
+  needs_review: Goal[];
+}
+
+export interface GoalLevelStat {
+  level: GoalLevel;
+  total: number;
+  completed: number;
+  missed: number;
+  dropped: number;
+  active: number;
+  /** Goals with an outcome: completed, missed, or their period is over. */
+  finished: number;
+  /** completed / finished, 0–100; null until a goal of this level has finished. */
+  rate: number | null;
+}
+
+export interface GoalTrendItem {
+  period_start: string;
+  label: string;
+  total: number;
+  completed: number;
+}
+
+export interface GoalTreeNode {
+  id: string;
+  title: string;
+  level: GoalLevel;
+  status: GoalStatus;
+  color: string;
+  period_label: string;
+  progress_pct: number;
+  tasks_completed: number;
+  children: GoalTreeNode[];
+}
+
+export interface GoalTaskStat {
+  goal_id: string;
+  title: string;
+  level: GoalLevel;
+  color: string;
+  tasks_completed: number;
+  tasks_total: number;
+}
+
+export interface GoalInsightsSummary {
+  total_goals: number;
+  completed_goals: number;
+  missed_goals: number;
+  active_goals: number;
+  completion_rate: number;
+  perfect_week_streak: number;
+  best_perfect_week_streak: number;
+  tasks_completed_for_goals: number;
+  tasks_completed_unlinked: number;
+  /** Share of completed tasks that served a goal. */
+  focus_pct: number;
+}
+
+export interface GoalInsights {
+  time_filter: string;
+  date_range: { start: string; end: string };
+  summary: GoalInsightsSummary;
+  by_level: GoalLevelStat[];
+  weekly_trend: GoalTrendItem[];
+  monthly_trend: GoalTrendItem[];
+  trees: GoalTreeNode[];
+  top_goals: GoalTaskStat[];
+  missed: Goal[];
 }

@@ -10,12 +10,14 @@ import {
   ListChecks,
   Repeat,
   Settings,
+  Target,
+  Trophy,
 } from 'lucide-react-native';
 
 import { NavGroup, NavRow } from '@/components/account/NavRow';
 import { zoneLabel } from '@/components/account/TimezonePicker';
 import { Card, Screen, Text } from '@/components/ui';
-import { useHabits, useProfile, useTodos } from '@/hooks/queries';
+import { useCurrentGoals, useHabits, useProfile, useTodos } from '@/hooks/queries';
 import { useSession } from '@/hooks/session';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -30,12 +32,15 @@ export default function BrowseScreen() {
   const profile = useProfile();
   const openTasks = useTodos({ view: 'pending' });
   const archived = useHabits('archived');
+  const goals = useCurrentGoals();
+  const reviewCount = goals.data?.needs_review.length ?? 0;
 
-  const refreshing = openTasks.isRefetching || archived.isRefetching || profile.isRefetching;
+  const refreshing = openTasks.isRefetching || archived.isRefetching || profile.isRefetching || goals.isRefetching;
   const refresh = () => {
     openTasks.refetch();
     archived.refetch();
     profile.refetch();
+    goals.refetch();
   };
 
   const name = isDemo ? 'Demo account' : profile.data?.email || email || 'My account';
@@ -87,6 +92,12 @@ export default function BrowseScreen() {
           label="Calendar"
           onPress={() => router.navigate('/(tabs)/calendar')}
         />
+        <NavRow
+          icon={<Target size={ICON} color={tint} />}
+          label="Goals"
+          value={reviewCount ? `${reviewCount} to review` : undefined}
+          onPress={() => router.push('/goals')}
+        />
       </NavGroup>
 
       <NavGroup title="Habits">
@@ -113,6 +124,11 @@ export default function BrowseScreen() {
           icon={<ListChecks size={ICON} color={tint} />}
           label="Task insights"
           onPress={() => router.push('/insights/tasks')}
+        />
+        <NavRow
+          icon={<Trophy size={ICON} color={tint} />}
+          label="Goal insights"
+          onPress={() => router.push('/insights/goals')}
         />
       </NavGroup>
 

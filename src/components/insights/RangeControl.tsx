@@ -69,13 +69,14 @@ export function useInsightsRange(initial: RangeKey = 'month') {
 
 export type InsightsRangeState = ReturnType<typeof useInsightsRange>;
 
-/** Range segmented control, plus a year stepper (Year) or two date fields (Custom). */
-export function RangeControl({ state }: { state: InsightsRangeState }) {
+/** Range segmented control, plus a year stepper (Year) or two date fields (Custom). `ranges` limits the options. */
+export function RangeControl({ state, ranges }: { state: InsightsRangeState; ranges?: RangeKey[] }) {
   const { colors } = useTheme();
   const { key, setKey, year, setYear, minYear, maxYear } = state;
+  const options = ranges ? OPTIONS.filter((o) => ranges.includes(o.value)) : OPTIONS;
   return (
     <View style={{ gap: space.sm }}>
-      <Segmented<RangeKey> value={key} onChange={setKey} options={OPTIONS} />
+      <Segmented<RangeKey> value={key} onChange={setKey} options={options} />
       {key === 'year' ? (
         <View style={styles.stepper}>
           <IconButton label="Previous year" size={34} disabled={year <= minYear} onPress={() => setYear(year - 1)}>

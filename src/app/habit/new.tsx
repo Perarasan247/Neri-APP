@@ -21,6 +21,7 @@ import {
   type ScheduleDraft,
 } from '@/components/habits/HabitFormParts';
 import { FormHeader } from '@/components/habits/FormHeader';
+import { GoalLinkField } from '@/components/goals/GoalPickerSheet';
 import { Field, KeyboardAvoider, KeyboardScrollView, Notice, TextField, useToast } from '@/components/ui';
 import { useCreateHabit, useHabits, useProfile } from '@/hooks/queries';
 import { haptic } from '@/lib/haptics';
@@ -60,6 +61,7 @@ export default function NewHabitScreen() {
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
   const [category, setCategory] = useState('Health');
   const [description, setDescription] = useState('');
+  const [goalId, setGoalId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -90,6 +92,7 @@ export default function NewHabitScreen() {
         icon,
         category: category.trim() || 'Personal',
         description: description.trim() || undefined,
+        goal_id: goalId ?? undefined,
         // The amount is named after the habit; there is no unit to configure
         ...(type === 'build_yesno' && logNumber ? { metric_label: name.trim().slice(0, 64) } : {}),
         schedule: { ...schedulePayload(schedule, type), effective_from: startDate },
@@ -200,6 +203,10 @@ export default function NewHabitScreen() {
               />
               <CategorySuggestions value={category} suggestions={suggestions} onPick={setCategory} />
             </View>
+          </FormSection>
+
+          <FormSection title="Goal" hint="Optional. The goal this habit helps with; its days show up on the goal.">
+            <GoalLinkField value={goalId} onChange={setGoalId} />
           </FormSection>
 
           <FormSection title="Description">

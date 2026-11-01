@@ -4,6 +4,13 @@ import { StyleSheet, View } from 'react-native';
 import { Card, Text } from '@/components/ui';
 import { space } from '@/theme/tokens';
 
+/** The three insights screens, switched with a segmented control at the top of each. */
+export const INSIGHTS_ROUTES = {
+  habits: '/insights',
+  tasks: '/insights/tasks',
+  goals: '/insights/goals',
+} as const;
+
 /** Card with a title, optional description / right accessory, and chart body. */
 export function ChartCard({
   title,
