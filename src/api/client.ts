@@ -1,5 +1,7 @@
 import { config, isSupabaseConfigured } from '@/lib/config';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { setServerReachable } from '@/offline/connectivity';
 
 /** Error carrying the HTTP status so callers can branch on 401 / 404 / network. */
 export class ApiError extends Error {
@@ -17,13 +19,71 @@ export class ApiError extends Error {
   }
 }
 
+type UnauthorizedListener = () => void;
+let onUnauthorized: UnauthorizedListener | null = null;
+/** Registered by the session provider: called when the server rejects our token (HTTP 401). */
+export function setUnauthorizedHandler(fn: UnauthorizedListener | null) {
+  onUnauthorized = fn;
+}
+
+type ReadGate = () => Promise<void>;
+let beforeRead: ReadGate | null = null;
+/**
+ * Registered by the sync engine: reads wait here while queued offline changes are being sent, so a
+ * refetch never lands before them and overwrites what the user just did with stale server data.
+ */
+export function setReadGate(fn: ReadGate | null) {
+  beforeRead = fn;
+}
+
+/** A failure to reach the server at all (offline, DNS, timeout), as opposed to the server saying no. */
+export const isNetworkError = (e: unknown): e is ApiError => e instanceof ApiError && e.isNetwork;
+
+/** FastAPI sends `detail` as a string, or as a list of {loc, msg} for validation errors. */
+function detailText(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail.trim() || null;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d: any) => {
+        const msg = typeof d?.msg === 'string' ? d.msg.replace(/^Value error, /, '') : '';
+        const field = Array.isArray(d?.loc) ? String(d.loc[d.loc.length - 1] ?? '') : '';
+        return msg && field && field !== 'body' ? `${field.replace(/_/g, ' ')}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join('. ') : null;
+  }
+  return null;
+}
+
+/** Turn an HTTP failure into something a person can act on. */
+function messageForStatus(status: number, detail: unknown): string {
+  const text = detailText(detail);
+  if (status === 401) return 'Your session has expired. Please sign in again.';
+  if (status === 403) return text || 'You don’t have permission to do that.';
+  if (status === 404) return text || 'We couldn’t find that. It may have been deleted.';
+  if (status === 408) return 'The request timed out. Please try again.';
+  if (status === 409) return text || 'That conflicts with something that already exists.';
+  if (status === 400 || status === 422) return text || 'Some of the details aren’t valid. Please check them and try again.';
+  if (status === 429) return 'Too many requests. Please wait a moment and try again.';
+  if (status === 502 || status === 503 || status === 504) return 'The server is temporarily unavailable. Please try again in a moment.';
+  if (status >= 500) return 'Something went wrong on our side. Please try again.';
+  return text || `Request failed (${status}).`;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   if (!isSupabaseConfigured) return {};
   try {
-    const { data } = await supabase.auth.getSession();
+    const { data, error } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
+    if (token) return { Authorization: `Bearer ${token}` };
+    // Expired token that couldn't be refreshed because we're offline: the session still exists, so
+    // don't send an unauthenticated request (the server would answer 401 and we'd sign the user out)
+    if (error && isAuthRetryableFetchError(error)) {
+      throw new ApiError('Your session can’t be refreshed while you’re offline.', 0, 'network');
+    }
+    return {};
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
     return {};
   }
 }
@@ -40,15 +100,12 @@ function buildUrl(path: string, query?: Query): string {
   return `${config.apiUrl}/api${path}${qs ? `?${qs}` : ''}`;
 }
 
-/**
- * Typed fetch wrapper: base URL, auth, JSON, timeout and uniform errors.
- * FastAPI puts error messages in `detail`; we surface that text.
- */
-export async function request<T>(
+/** One HTTP round trip: base URL, auth, timeout; reports whether the server answered. */
+async function send(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
-  opts: { query?: Query; body?: unknown } = {},
-): Promise<T> {
+  opts: { query?: Query; body?: unknown; accept?: string },
+): Promise<{ res: Response; text: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.requestTimeoutMs);
 
@@ -58,7 +115,7 @@ export async function request<T>(
       method,
       signal: controller.signal,
       headers: {
-        Accept: 'application/json',
+        Accept: opts.accept ?? 'application/json',
         ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(await authHeaders()),
       },
@@ -66,6 +123,7 @@ export async function request<T>(
     });
   } catch (e: any) {
     const timedOut = e?.name === 'AbortError';
+    setServerReachable(false);
     throw new ApiError(
       timedOut
         ? 'The server took too long to respond.'
@@ -77,26 +135,68 @@ export async function request<T>(
     clearTimeout(timer);
   }
 
-  const text = await res.text();
-  let data: any = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  }
+  // Any HTTP answer (even an error) proves the server is up
+  setServerReachable(true);
+  return { res, text: await res.text() };
+}
 
-  if (!res.ok) {
-    const detail = data?.detail;
-    const message =
-      typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d: any) => d?.msg).filter(Boolean).join(', ')
-          : res.statusText || `Request failed (${res.status})`;
-    throw new ApiError(message, res.status);
+function parseJson(text: string): any {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function failure(res: Response, data: any): ApiError {
+  if (res.status === 401) onUnauthorized?.();
+  return new ApiError(messageForStatus(res.status, data?.detail), res.status);
+}
+
+/**
+ * Typed fetch wrapper: base URL, auth, JSON, timeout and uniform errors.
+ * FastAPI puts error messages in `detail`; we surface that text.
+ */
+export async function request<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  opts: { query?: Query; body?: unknown } = {},
+): Promise<T> {
+  if (method === 'GET' && beforeRead) await beforeRead();
+
+  const { res, text } = await send(method, path, opts);
+  const data = parseJson(text);
+
+  if (!res.ok) throw failure(res, data);
+
+  // 2xx but not JSON: usually a wrong server address answering with a web page
+  if (text && typeof data === 'string') {
+    throw new ApiError('The server sent a reply we couldn’t read. Check the server address in Settings.', res.status);
   }
 
   return data as T;
+}
+
+/** GET that returns the body as text (file exports). Not gated: it is a deliberate user action. */
+export async function requestText(path: string, query?: Query): Promise<string> {
+  const { res, text } = await send('GET', path, { query, accept: '*/*' });
+  if (!res.ok) throw failure(res, parseJson(text));
+  return text;
+}
+
+/** Cheap "is the server up?" check against the root endpoint (no auth, never throws). */
+export async function pingServer(timeoutMs = 5000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${config.apiUrl}/`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    setServerReachable(true);
+    return res.status < 500;
+  } catch {
+    setServerReachable(false);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }

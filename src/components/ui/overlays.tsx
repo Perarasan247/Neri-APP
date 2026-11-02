@@ -49,7 +49,7 @@ export function Sheet({
   scroll = true,
   contentStyle,
 }: SheetProps) {
-  const { colors } = useTheme();
+  const { colors, reduceMotion } = useTheme();
   const insets = useSafeAreaInsets();
   const keyboardUp = useKeyboardVisible();
 
@@ -96,7 +96,7 @@ export function Sheet({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={reduceMotion ? 'none' : 'slide'}
       onRequestClose={onClose}
       onDismiss={Platform.OS === 'ios' ? onDismissed : undefined}
       statusBarTranslucent
@@ -215,12 +215,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ToastView({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
-  const { colors } = useTheme();
+  const { colors, reduceMotion } = useTheme();
   const insets = useSafeAreaInsets();
-  const [anim] = useState(() => new Animated.Value(0));
+  const [anim] = useState(() => new Animated.Value(reduceMotion ? 1 : 0));
   useEffect(() => {
-    Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
-  }, [anim]);
+    if (reduceMotion) anim.setValue(1);
+    else Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
+  }, [anim, reduceMotion]);
   const bg = toast.tone === 'danger' ? colors.danger : colors.fg;
   const fg = toast.tone === 'danger' ? '#ffffff' : colors.canvas;
   return (

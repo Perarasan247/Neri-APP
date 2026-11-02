@@ -7,9 +7,14 @@ import { useSyncExternalStore } from 'react';
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import * as api from '@/api/endpoints';
+import type { OutboxOp } from '@/offline/outbox';
 import type { Goal, GoalCurrent, GoalDetail, GoalLevel, Habit, MonthlyData, RepeatScope, Subtask, Todo, TodayData } from '@/api/types';
+import { today as todayISO } from '@/lib/format';
 import { pushGoalPrompt } from '@/lib/goalPrompts';
 import { applyGoalPatch, isValidParent, parentCandidatePeriods } from '@/lib/goals';
+import { newClientId } from '@/lib/id';
+import { sortTodos, todoMatchesQuery } from '@/lib/todoFilters';
+import { sendOrQueue } from '@/offline/sync';
 
 /* ---------- Keys ---------- */
 
@@ -90,12 +95,49 @@ function recount(d: TodayData): TodayData {
   };
 }
 
+/** The cached Today row for a habit on a date (reflects optimistic updates). */
+function cachedTodayItem(qc: QueryClient, date: string, habitId: string) {
+  for (const [, d] of qc.getQueriesData<TodayData>({ queryKey: ['today'] })) {
+    if (d && d.date === date) {
+      const hit = d.items.find((i) => i.habit.id === habitId);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** What Today looks like once a date is marked (or unmarked) as a whole-day rest, before the server says. */
+function applyRestDay(d: TodayData, on: boolean, reason?: string): TodayData {
+  const items = d.items.map((i) =>
+    on
+      ? i.is_skipped && i.skip_scope === 'habit'
+        ? i
+        : { ...i, is_skipped: true, skip_scope: 'day' as const, skip_reason: reason || 'Rest Day' }
+      : i.skip_scope === 'day'
+        ? { ...i, is_skipped: false, skip_scope: null, skip_reason: null }
+        : i,
+  );
+  const due = items.filter((i) => i.is_scheduled_today && i.is_applicable && !i.is_skipped);
+  const done = due.filter((i) => i.status === 'done').length;
+  return {
+    ...d,
+    is_whole_day_skip: on,
+    whole_day_skip_reason: on ? reason || 'Rest Day' : null,
+    items,
+    total_due_today: due.length,
+    total_done_today: done,
+    completion_rate: due.length ? Math.round((done / due.length) * 100) : 0,
+  };
+}
+
 /** Yes/No habit: toggle done for a date. */
 export function useToggleHabit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { habitId: string; date: string; done: boolean }) =>
-      api.upsertLog({ habit_id: v.habitId, log_date: v.date, count: v.done ? 1 : 0, status: 'done' }),
+    mutationFn: (v: { habitId: string; date: string; done: boolean }) => {
+      const body = { habit_id: v.habitId, log_date: v.date, count: v.done ? 1 : 0, status: 'done' as const };
+      return sendOrQueue({ type: 'upsertLog', body }, () => api.upsertLog(body), undefined);
+    },
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ['today'] });
       const rollback = patchToday(qc, v.date, (d) =>
@@ -124,7 +166,15 @@ export function useToggleHabit() {
 export function useIncrementHabit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { habitId: string; date: string; delta: number }) => api.incrementLog(v.habitId, v.date, v.delta),
+    mutationFn: (v: { habitId: string; date: string; delta: number }) => {
+      // Offline, queue the day's new total (already in the cache from the optimistic update) rather
+      // than "+1": an absolute value is safe to send twice, a delta is not
+      const item = cachedTodayItem(qc, v.date, v.habitId);
+      const op: OutboxOp = item
+        ? { type: 'upsertLog', body: { habit_id: v.habitId, log_date: v.date, count: item.count, status: 'done' } }
+        : { type: 'incrementLog', body: { habit_id: v.habitId, log_date: v.date, delta: v.delta } };
+      return sendOrQueue(op, () => api.incrementLog(v.habitId, v.date, v.delta), undefined);
+    },
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ['today'] });
       const rollback = patchToday(qc, v.date, (d) =>
@@ -149,8 +199,10 @@ export function useIncrementHabit() {
 export function useSetSlips() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { habitId: string; date: string; count: number }) =>
-      api.upsertLog({ habit_id: v.habitId, log_date: v.date, count: v.count, status: 'done' }),
+    mutationFn: (v: { habitId: string; date: string; count: number }) => {
+      const body = { habit_id: v.habitId, log_date: v.date, count: v.count, status: 'done' as const };
+      return sendOrQueue({ type: 'upsertLog', body }, () => api.upsertLog(body), undefined);
+    },
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ['today'] });
       const rollback = patchToday(qc, v.date, (d) =>
@@ -172,7 +224,7 @@ export function useSetSlips() {
 export function useUpsertLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.upsertLog,
+    mutationFn: (v: api.UpsertLogInput) => sendOrQueue({ type: 'upsertLog', body: v }, () => api.upsertLog(v), undefined),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: ['month'] });
       const snapshots = qc.getQueriesData<MonthlyData>({ queryKey: ['month'] });
@@ -212,7 +264,30 @@ export function useUpsertLog() {
 export function useAddValue() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { habitId: string; date: string; value: number }) => api.addValueEntry(v.habitId, v.date, v.value),
+    mutationFn: (v: { habitId: string; date: string; value: number }) => {
+      // One id for this measurement, reused if it has to be resent, so it is never counted twice
+      const body = { habit_id: v.habitId, entry_date: v.date, value: v.value, client_id: newClientId() };
+      return sendOrQueue(
+        { type: 'addValue', body },
+        () => api.addValueEntry(body.habit_id, body.entry_date, body.value, body.client_id),
+        undefined,
+      );
+    },
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ['today'] });
+      const rollback = patchToday(qc, v.date, (d) =>
+        recount({
+          ...d,
+          items: d.items.map((i) =>
+            i.habit.id === v.habitId
+              ? { ...i, status: 'done', count: Math.max(1, i.count), metric_total: (i.metric_total ?? 0) + v.value }
+              : i,
+          ),
+        }),
+      );
+      return { rollback };
+    },
+    onError: (_e, _v, ctx) => ctx?.rollback(),
     onSettled: () => invalidateHabitData(qc),
   });
 }
@@ -221,7 +296,17 @@ export function useRestDay() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { date: string; on: boolean; reason?: string }) =>
-      v.on ? api.createDaySkip(v.date, v.reason) : api.deleteDaySkip(v.date),
+      sendOrQueue(
+        { type: 'restDay', date: v.date, on: v.on, reason: v.reason },
+        () => (v.on ? api.createDaySkip(v.date, v.reason) : api.deleteDaySkip(v.date)),
+        undefined,
+      ),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ['today'] });
+      const rollback = patchToday(qc, v.date, (d) => applyRestDay(d, v.on, v.reason));
+      return { rollback };
+    },
+    onError: (_e, _v, ctx) => ctx?.rollback(),
     onSettled: () => invalidateHabitData(qc),
   });
 }
@@ -327,16 +412,84 @@ function patchTodos(qc: QueryClient, fn: (list: Todo[]) => Todo[]) {
   return () => snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
 }
 
+/** A task as the server will return it, built from the form input, for showing it before it is saved. */
+function draftTodo(input: api.TodoInput & { client_id: string }, userId: string): Todo {
+  const now = new Date().toISOString();
+  const time = input.start_time ?? input.due_time ?? null;
+  return {
+    id: input.client_id,
+    user_id: userId,
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    due_date: input.due_date ?? null,
+    due_time: input.due_time ?? time,
+    start_time: input.start_time ?? time,
+    end_time: input.end_time ?? null,
+    is_all_day: Boolean(input.is_all_day),
+    location: input.location?.trim() || null,
+    color: input.color ?? null,
+    priority: input.priority ?? 'medium',
+    category: input.category || 'Personal',
+    status: 'pending',
+    completed_at: null,
+    subtasks: input.subtasks ?? [],
+    series_id: null,
+    repeat: input.repeat ?? null,
+    goal_id: input.goal_id ?? null,
+    sort_order: 0,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 export function useCreateTodo() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: api.createTodo, onSettled: () => invalidateTodoData(qc) });
+  const m = useMutation({
+    mutationFn: (input: api.TodoInput & { client_id: string }) =>
+      sendOrQueue<Todo>(
+        { type: 'createTodo', body: input },
+        () => api.createTodo(input),
+        draftTodo(input, ''),
+      ),
+    // Show the new task straight away in every cached list it belongs in
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ['todos'] });
+      const draft = draftTodo(input, '');
+      const day = todayISO();
+      const snapshots = qc.getQueriesData<Todo[]>({ queryKey: ['todos'] });
+      for (const [key, list] of snapshots) {
+        const query = (key[1] ?? {}) as api.TodoQuery;
+        if (list && !list.some((t) => t.id === draft.id) && todoMatchesQuery(draft, query, day)) {
+          qc.setQueryData(key, sortTodos([...list, draft], query.sort_by, day));
+        }
+      }
+      return { rollback: () => snapshots.forEach(([key, data]) => qc.setQueryData(key, data)) };
+    },
+    onError: (_e, _v, ctx) => ctx?.rollback(),
+    onSettled: () => invalidateTodoData(qc),
+  });
+  // Every create gets its own id up front: it names the task while offline and makes a resend harmless
+  return {
+    ...m,
+    mutate: (input: api.TodoInput, opts?: Parameters<typeof m.mutate>[1]) =>
+      m.mutate({ ...input, client_id: input.client_id ?? newClientId() }, opts),
+    mutateAsync: (input: api.TodoInput, opts?: Parameters<typeof m.mutateAsync>[1]) =>
+      m.mutateAsync({ ...input, client_id: input.client_id ?? newClientId() }, opts),
+  };
 }
 
 export function useUpdateTodo() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: string; patch: api.TodoPatch; scope?: Exclude<RepeatScope, 'all'> }) =>
-      api.updateTodo(v.id, v.patch, v.scope),
+      sendOrQueue(
+        // Edits that reshape a repeating series need the server's recurrence logic: online only
+        (v.scope ?? 'this') === 'this' && !('repeat' in v.patch)
+          ? { type: 'updateTodo', id: v.id, patch: v.patch, scope: 'this' }
+          : null,
+        () => api.updateTodo(v.id, v.patch, v.scope),
+        undefined as unknown as Todo,
+      ),
     // A series-wide or repeat-rule change touches many rows: skip the optimistic patch and refetch
     onMutate: async (v) => {
       if ((v.scope ?? 'this') !== 'this' || 'repeat' in v.patch) return undefined;
@@ -354,7 +507,14 @@ export function useUpdateTodo() {
 export function useToggleTodo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.toggleTodo(id),
+    mutationFn: (id: string) => {
+      // Offline, queue "set status to X" (from the optimistic update), not "flip": flipping twice would undo itself
+      const t = findCachedTodo(qc, id);
+      const op: OutboxOp | null = t
+        ? { type: 'updateTodo', id, patch: { status: t.status }, scope: 'this' }
+        : null;
+      return sendOrQueue(op, () => api.toggleTodo(id), undefined as unknown as Todo);
+    },
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ['todos'] });
       const rollback = patchTodos(qc, (l) =>
@@ -399,7 +559,12 @@ export function useUpdateSubtasks() {
 export function useDeleteTodo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; scope?: RepeatScope }) => api.deleteTodo(v.id, v.scope),
+    mutationFn: (v: { id: string; scope?: RepeatScope }) =>
+      sendOrQueue(
+        (v.scope ?? 'this') === 'this' ? { type: 'deleteTodo', id: v.id, scope: 'this' } : null,
+        () => api.deleteTodo(v.id, v.scope),
+        { message: 'queued' },
+      ),
     onMutate: async (v) => {
       if ((v.scope ?? 'this') !== 'this') return undefined;
       await qc.cancelQueries({ queryKey: ['todos'] });

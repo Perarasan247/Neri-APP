@@ -4,6 +4,7 @@ import { router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { HabitType } from '@/api/types';
+import { EndDateField } from '@/components/habits/EndDateField';
 import { DateField } from '@/components/habits/DateField';
 import {
   CategorySuggestions,
@@ -57,6 +58,7 @@ export default function NewHabitScreen() {
   });
   const [logNumber, setLogNumber] = useState(false);
   const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState('');
   const [icon, setIcon] = useState('Target');
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
   const [category, setCategory] = useState('Health');
@@ -73,13 +75,15 @@ export default function NewHabitScreen() {
       : trackingStart && startDate < trackingStart
         ? 'Start date can’t be before your tracking start date.'
         : null;
+  const endMin = startDate > todayStr ? startDate : todayStr;
+  const endError = endDate && endDate < endMin ? 'End date can’t be before the start date or in the past.' : null;
 
   const suggestions = categorySuggestions((habits.data ?? []).map((h) => h.category));
 
   const save = () => {
     setSubmitted(true);
     setServerError(null);
-    if (!name.trim() || validateSchedule(schedule, type) || dateError) {
+    if (!name.trim() || validateSchedule(schedule, type) || dateError || endError) {
       haptic.warning();
       return;
     }
@@ -88,6 +92,7 @@ export default function NewHabitScreen() {
         name: name.trim(),
         type,
         start_date: startDate,
+        ...(endDate ? { end_date: endDate } : {}),
         color,
         icon,
         category: category.trim() || 'Personal',
@@ -181,6 +186,12 @@ export default function NewHabitScreen() {
                 title="Start date"
                 invalid={Boolean(dateError)}
               />
+            </Field>
+          </FormSection>
+
+          <FormSection title="End date" hint="Optional. The habit stops showing after this day. Leave it empty to keep going until you delete it.">
+            <Field error={endError}>
+              <EndDateField value={endDate} onChange={setEndDate} min={endMin} invalid={Boolean(endError)} />
             </Field>
           </FormSection>
 

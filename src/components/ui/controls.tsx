@@ -13,9 +13,10 @@ import {
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Check, Plus } from 'lucide-react-native';
 
+import { AppTextInput } from './TextInput';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
-import { brand, elevation, font, radius, space } from '@/theme/tokens';
+import { elevation, font, radius, space } from '@/theme/tokens';
 import { withAlpha } from './HabitIcon';
 import { requestReveal } from './keyboard';
 import { Text } from './Text';
@@ -68,7 +69,7 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         {
-          height: h,
+          minHeight: h,
           paddingHorizontal: size === 'sm' ? space.md : space.lg + 2,
           borderRadius: size === 'sm' ? radius.md : radius.md + 2,
           backgroundColor: pressed ? v.pressed : v.bg,
@@ -136,12 +137,12 @@ export function Fab({ onPress, label = 'Add' }: { onPress: () => void; label?: s
         { backgroundColor: colors.accent, shadowColor: colors.accent, transform: [{ scale: pressed ? 0.94 : 1 }] },
       ]}
     >
-      {/* Brand gradient, same as the logo (indigo to violet) */}
+      {/* Brand gradient (indigo to violet by default, follows a custom accent) */}
       <Svg width={56} height={56} style={StyleSheet.absoluteFill}>
         <Defs>
           <LinearGradient id="fabGradient" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={brand.from} />
-            <Stop offset="1" stopColor={brand.to} />
+            <Stop offset="0" stopColor={colors.brandFrom} />
+            <Stop offset="1" stopColor={colors.brandTo} />
           </LinearGradient>
         </Defs>
         <Rect width={56} height={56} rx={radius.xl} fill="url(#fabGradient)" />
@@ -293,7 +294,7 @@ export function TextField({
 }: TextInputProps & { invalid?: boolean; ref?: React.Ref<React.ComponentRef<typeof TextInput>> }) {
   const { colors } = useTheme();
   return (
-    <TextInput
+    <AppTextInput
       ref={ref}
       placeholderTextColor={colors.fgSubtle}
       selectionColor={colors.accent}
@@ -533,13 +534,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs + 2,
-    height: 34,
+    minHeight: 34,
+    paddingVertical: 4,
     paddingHorizontal: space.md + 2,
     borderRadius: radius.pill,
     borderWidth: 1,
   },
   segmented: { flexDirection: 'row', borderRadius: radius.md + 2, padding: 3 },
-  segment: { flex: 1, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md - 1, paddingHorizontal: space.sm },
+  segment: { flex: 1, minHeight: 34, paddingVertical: 4, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md - 1, paddingHorizontal: space.sm },
   segmentActive: {
     shadowColor: '#000',
     shadowOpacity: 0.08,

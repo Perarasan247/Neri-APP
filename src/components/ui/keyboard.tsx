@@ -13,6 +13,8 @@ import {
   type ViewProps,
 } from 'react-native';
 
+import { useTheme } from '@/theme/ThemeProvider';
+
 /*
  * One keyboard mechanism for the whole app.
  *
@@ -57,6 +59,11 @@ export function useKeyboardVisible() {
  * between its on-screen frame and the keyboard. Use as the root of any screen or sheet host with inputs.
  */
 export function KeyboardAvoider({ style, children, onLayout, ...props }: ViewProps) {
+  const { reduceMotion } = useTheme();
+  const calm = useRef(reduceMotion);
+  useEffect(() => {
+    calm.current = reduceMotion;
+  }, [reduceMotion]);
   const ref = useRef<ViewInstance>(null);
   const keyboardTop = useRef<number | null>(null);
   const [pad, setPad] = useState(0);
@@ -70,7 +77,7 @@ export function KeyboardAvoider({ style, children, onLayout, ...props }: ViewPro
     }
     view.measureInWindow((_x, y, _w, h) => {
       const next = Math.max(0, Math.round(y + h - top));
-      if (Platform.OS === 'ios' && duration) {
+      if (Platform.OS === 'ios' && duration && !calm.current) {
         LayoutAnimation.configureNext(LayoutAnimation.create(duration, 'keyboard', 'opacity'));
       }
       setPad(next);
@@ -84,7 +91,7 @@ export function KeyboardAvoider({ style, children, onLayout, ...props }: ViewPro
     });
     const hide = Keyboard.addListener(HIDE, (e: KeyboardEvent) => {
       keyboardTop.current = null;
-      if (Platform.OS === 'ios' && e.duration) {
+      if (Platform.OS === 'ios' && e.duration && !calm.current) {
         LayoutAnimation.configureNext(LayoutAnimation.create(e.duration, 'keyboard', 'opacity'));
       }
       setPad(0);

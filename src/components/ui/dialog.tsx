@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -188,20 +188,12 @@ function DialogCard({
   onScrim?: () => void;
   onPress: (b: DialogButton) => void;
 }) {
-  const { colors } = useTheme();
+  const { colors, reduceMotion } = useTheme();
   const [anim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    let live = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .catch(() => false)
-      .then((reduced) => {
-        if (live) Animated.timing(anim, { toValue: 1, duration: reduced ? 0 : 160, useNativeDriver: true }).start();
-      });
-    return () => {
-      live = false;
-    };
-  }, [anim]);
+    Animated.timing(anim, { toValue: 1, duration: reduceMotion ? 0 : 160, useNativeDriver: true }).start();
+  }, [anim, reduceMotion]);
 
   const stacked = request.buttons.length > 2;
   const look = (style: DialogButton['style']) =>

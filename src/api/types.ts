@@ -35,6 +35,8 @@ export interface Habit {
   metric_unit?: string | null;
   /** The goal this habit serves, if any. */
   goal_id?: string | null;
+  /** Upcoming last day the user chose (inclusive); empty = runs until deleted. */
+  end_date?: string | null;
   created_at: string;
   periods: HabitPeriod[];
   schedules: HabitSchedule[];

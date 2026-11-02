@@ -22,7 +22,9 @@ function TodayIcon({ color, focused }: { color: string; focused: boolean }) {
 }
 
 export default function TabsLayout() {
-  const { colors } = useTheme();
+  const { colors, textScale } = useTheme();
+  // Labels follow the in-app text size too, but stay small enough that five tabs always fit
+  const labelScale = textScale === null ? 1 : Math.min(textScale, 1.3);
   return (
     <Tabs
       screenListeners={{ tabPress: () => haptic.tap() }}
@@ -36,7 +38,8 @@ export default function TabsLayout() {
           borderTopWidth: StyleSheet.hairlineWidth,
           paddingTop: 4,
         },
-        tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600', letterSpacing: 0.1 },
+        tabBarAllowFontScaling: textScale === null,
+        tabBarLabelStyle: { fontSize: 10.5 * labelScale, fontWeight: '600', letterSpacing: 0.1 },
         sceneStyle: { backgroundColor: colors.canvas },
       }}
     >

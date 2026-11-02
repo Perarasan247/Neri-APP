@@ -25,6 +25,8 @@ export const palette = {
     accentFg: '#ffffff',
     accentText: '#4e42e3',
     accent2: '#9a5cff',
+    brandFrom: '#5b4ff5',
+    brandTo: '#9a5cff',
 
     success: '#0a7d57',
     successSoft: '#e1f5ec',
@@ -63,6 +65,8 @@ export const palette = {
     accentFg: '#ffffff',
     accentText: '#aaa1ff',
     accent2: '#b07cff',
+    brandFrom: '#5b4ff5',
+    brandTo: '#9a5cff',
 
     success: '#3dd598',
     successSoft: '#0f2a20',

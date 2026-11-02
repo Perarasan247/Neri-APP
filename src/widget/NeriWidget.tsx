@@ -15,6 +15,7 @@ import type { WidgetInfo, WidgetRepresentation } from 'react-native-android-widg
 
 import type { TodoPriority } from '@/api/types';
 import { friendlyDate } from '@/lib/format';
+import { deriveAccent } from '@/theme/accent';
 
 import type { WidgetHabit, WidgetSnapshot, WidgetTask, WidgetViewState } from './store';
 
@@ -487,16 +488,24 @@ function NeriWidgetView({ snapshot, state, now, width, height, t }: Props) {
   );
 }
 
+/** A widget theme recoloured with the user's accent (the base theme when there is none). */
+export function withAccent(base: WidgetTheme, accent: string | null | undefined, scheme: 'light' | 'dark'): WidgetTheme {
+  if (!accent) return base;
+  const a = deriveAccent(accent, scheme);
+  return { ...base, accent: asHex(a.accent, base.accent), accentSoft: asHex(a.accentSoft, base.accentSoft), onAccent: asHex(a.accentFg, base.onAccent) };
+}
+
 /** Light and dark variants; Android picks one from the system theme. */
 export function renderNeriWidget(
   snapshot: WidgetSnapshot | null,
   state: WidgetViewState,
   now: string,
   info: Pick<WidgetInfo, 'width' | 'height'>,
+  accent?: string | null,
 ): WidgetRepresentation {
   const common = { snapshot, state, now, width: info.width, height: info.height };
   return {
-    light: <NeriWidgetView {...common} t={LIGHT} />,
-    dark: <NeriWidgetView {...common} t={DARK} />,
+    light: <NeriWidgetView {...common} t={withAccent(LIGHT, accent, 'light')} />,
+    dark: <NeriWidgetView {...common} t={withAccent(DARK, accent, 'dark')} />,
   };
 }

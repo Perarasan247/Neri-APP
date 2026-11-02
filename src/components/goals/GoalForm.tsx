@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronRight, Link2, Plus, Trash2, X } from 'lucide-react-native';
 
+import { AppTextInput } from '@/components/ui/TextInput';
 import type { ChecklistItem, Goal, GoalDetail, GoalLevel, GoalMeasure } from '@/api/types';
 import { FormHeader } from '@/components/habits/FormHeader';
 import { ColorPicker, FormSection } from '@/components/habits/HabitFormParts';
@@ -323,7 +324,7 @@ export function GoalForm({ goal, defaults = {} }: { goal?: GoalDetail; defaults?
                   ]}
                 >
                   <Plus size={16} color={colors.accent} />
-                  <TextInput
+                  <AppTextInput
                     value={draftItem}
                     onChangeText={setDraftItem}
                     onFocus={requestReveal}

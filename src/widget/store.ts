@@ -14,6 +14,7 @@ import type { HabitType, StreakUnit, TodoPriority } from '@/api/types';
 
 const SNAPSHOT_KEY = 'neri.widget.snapshot.v1';
 const QUEUE_KEY = 'neri.widget.queue.v1';
+const ACCENT_KEY = 'neri.widget.accent.v1';
 const STATE_KEY = (widgetId: number) => `neri.widget.state.${widgetId}`;
 
 /* ---------- Types ---------- */
@@ -111,6 +112,15 @@ export const writeSnapshot = (s: WidgetSnapshot) => writeJSON(SNAPSHOT_KEY, s);
 
 export const readQueue = async () => (await readJSON<WidgetAction[]>(QUEUE_KEY)) ?? [];
 export const writeQueue = (q: WidgetAction[]) => writeJSON(QUEUE_KEY, q);
+
+/* ---------- Accent colour ---------- */
+
+/** The app's custom accent (#rrggbb) so the widget matches it; null = the Neri default. */
+export async function readWidgetAccent(): Promise<string | null> {
+  const v = await readJSON<string | null>(ACCENT_KEY);
+  return typeof v === 'string' ? v : null;
+}
+export const writeWidgetAccent = (hex: string | null) => writeJSON(ACCENT_KEY, hex);
 
 /* ---------- Per-widget view state ---------- */
 

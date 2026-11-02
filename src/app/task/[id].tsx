@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   Calendar,
@@ -21,6 +21,7 @@ import {
   Trash2,
 } from 'lucide-react-native';
 
+import { AppTextInput } from '@/components/ui/TextInput';
 import type { Repeat, RepeatScope, Todo } from '@/api/types';
 import {
   ActionSheet,
@@ -317,7 +318,7 @@ function TaskDetail({ todo }: { todo: Todo }) {
         <View style={styles.titleCheck}>
           <Checkbox checked={done} onChange={onToggle} color={pColor} size={24} label={done ? 'Mark as not done' : 'Complete task'} />
         </View>
-        <TextInput
+        <AppTextInput
           onFocus={requestReveal}
           value={title}
           onChangeText={setTitle}
@@ -336,7 +337,7 @@ function TaskDetail({ todo }: { todo: Todo }) {
           ]}
         />
       </View>
-      <TextInput
+      <AppTextInput
         onFocus={requestReveal}
         value={description}
         onChangeText={setDescription}
@@ -443,7 +444,7 @@ function TaskDetail({ todo }: { todo: Todo }) {
           <View style={styles.detailIcon}>
             <MapPin size={18} color={colors.fgMuted} />
           </View>
-          <TextInput
+          <AppTextInput
             onFocus={requestReveal}
             value={location}
             onChangeText={setLocation}

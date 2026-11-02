@@ -268,7 +268,7 @@ export default function InboxScreen() {
 
   const empty = query.isPending ? (
     <ListSkeleton rows={6} />
-  ) : query.error ? (
+  ) : query.error && !query.data ? (
     <ErrorState error={query.error} onRetry={() => query.refetch()} />
   ) : hasFilters ? (
     <EmptyState

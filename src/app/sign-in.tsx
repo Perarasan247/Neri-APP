@@ -7,7 +7,6 @@ import Animated, {
   FadeOutUp,
   LinearTransition,
   useAnimatedStyle,
-  useReducedMotion,
   useSharedValue,
   withRepeat,
   withSequence,
@@ -16,15 +15,16 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, type LucideIcon } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, User, type LucideIcon } from 'lucide-react-native';
 
 import { BrandMark } from '@/components/account/BrandMark';
 import { KeyboardAvoider, KeyboardScrollView, Notice, Text, TextField } from '@/components/ui';
 import { useSession } from '@/hooks/session';
 import { isSupabaseConfigured } from '@/lib/config';
+import { authErrorMessage } from '@/lib/authErrors';
 import { haptic } from '@/lib/haptics';
 import { supabase } from '@/lib/supabase';
-import { useTheme } from '@/theme/ThemeProvider';
+import { useReduceMotion, useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
 
 type Mode = 'signIn' | 'signUp' | 'forgotPassword';
@@ -48,6 +48,7 @@ export default function SignInScreen() {
   const { signIn, signUp } = useSession();
 
   const [mode, setMode] = useState<Mode>('signIn');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,6 +56,7 @@ export default function SignInScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const emailRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const confirmRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const scrollViewRef = useRef<ScrollViewInstance>(null);
@@ -65,7 +67,7 @@ export default function SignInScreen() {
   const mismatch = isSignUp && confirmPassword !== '' && confirmPassword !== password;
   const canSubmit = isForgot
     ? emailOk
-    : emailOk && password.length >= 6 && (!isSignUp || (confirmPassword.length > 0 && confirmPassword === password));
+    : emailOk && (!isSignUp || name.trim().length > 0) && password.length >= 6 && (!isSignUp || (confirmPassword.length > 0 && confirmPassword === password));
 
   const switchMode = (next: Mode) => {
     haptic.tap();
@@ -81,7 +83,7 @@ export default function SignInScreen() {
       return;
     }
     if (isSignUp) {
-      const { needsConfirmation } = await signUp(email.trim(), password);
+      const { needsConfirmation } = await signUp(email.trim(), password, name);
       if (needsConfirmation) {
         setNotice('Account created. Check your email to confirm it, then log in.');
         setConfirmPassword('');
@@ -108,7 +110,7 @@ export default function SignInScreen() {
     try {
       await (isForgot ? submitReset() : submitAuth());
     } catch (e) {
-      setError(e instanceof Error ? e.message : isForgot ? 'Couldn’t send the reset email.' : 'Couldn’t log you in.');
+      setError(authErrorMessage(e, isForgot ? 'Couldn’t send the reset email.' : 'Couldn’t log you in.'));
     } finally {
       setBusy(false);
     }
@@ -157,7 +159,26 @@ export default function SignInScreen() {
                 </Animated.View>
               ) : null}
 
+              {isSignUp ? (
+                <Animated.View entering={FadeInDown.duration(240)} exiting={FadeOutUp.duration(160)}>
+                  <AuthField
+                    icon={User}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Name"
+                    autoCapitalize="words"
+                    autoComplete="name"
+                    textContentType="name"
+                    maxLength={60}
+                    returnKeyType="next"
+                    submitBehavior="submit"
+                    onSubmitEditing={() => emailRef.current?.focus()}
+                  />
+                </Animated.View>
+              ) : null}
+
               <AuthField
+                ref={emailRef}
                 icon={Mail}
                 value={email}
                 onChangeText={setEmail}
@@ -292,7 +313,7 @@ export default function SignInScreen() {
 /** Soft brand-coloured light behind the logo that slowly breathes. */
 function Glow() {
   const { colors, scheme } = useTheme();
-  const reduced = useReducedMotion();
+  const reduced = useReduceMotion();
   const pulse = useSharedValue(0);
 
   useEffect(() => {
@@ -409,7 +430,7 @@ function PrimaryButton({
 
 /** Shakes its child whenever `trigger` changes (e.g. a new error message). */
 function Shake({ trigger, children }: { trigger: unknown; children: React.ReactNode }) {
-  const reduced = useReducedMotion();
+  const reduced = useReduceMotion();
   const x = useSharedValue(0);
 
   useEffect(() => {

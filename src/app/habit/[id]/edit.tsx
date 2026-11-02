@@ -23,6 +23,7 @@ import {
   type ScheduleDraft,
 } from '@/components/habits/HabitFormParts';
 import { FormHeader } from '@/components/habits/FormHeader';
+import { EndDateField } from '@/components/habits/EndDateField';
 import { GoalLinkField } from '@/components/goals/GoalPickerSheet';
 import { Stepper } from '@/components/habits/Stepper';
 import {
@@ -54,7 +55,7 @@ export default function EditHabitScreen() {
 
   let body: React.ReactNode;
   if (habit.isPending) body = <View style={{ padding: space.lg }}><ListSkeleton rows={4} /></View>;
-  else if (habit.error) body = <ErrorState error={habit.error} onRetry={() => habit.refetch()} />;
+  else if (habit.error && !habit.data) body = <ErrorState error={habit.error} onRetry={() => habit.refetch()} />;
   else if (!habit.data) body = <EmptyState title="Habit not found" description="It may have been deleted." />;
   else return <EditForm key={habit.data.id} habit={habit.data} />;
 
@@ -83,6 +84,7 @@ function EditForm({ habit }: { habit: Habit }) {
   const [description, setDescription] = useState(habit.description ?? '');
   const [sortOrder, setSortOrder] = useState(habit.sort_order ?? 0);
   const [goalId, setGoalId] = useState<string | null>(habit.goal_id ?? null);
+  const [endDate, setEndDate] = useState(habit.end_date ?? '');
   const [logNumber, setLogNumber] = useState(!!habit.metric_label);
   const [schedule, setSchedule] = useState<ScheduleDraft>(original);
   const [effectiveFrom, setEffectiveFrom] = useState(today());
@@ -98,6 +100,7 @@ function EditForm({ habit }: { habit: Habit }) {
     description.trim() !== (habit.description ?? '') ||
     sortOrder !== habit.sort_order ||
     goalId !== (habit.goal_id ?? null) ||
+    endDate !== (habit.end_date ?? '') ||
     (habit.type === 'build_yesno' && logNumber !== !!habit.metric_label);
   const scheduleDirty = habit.type !== 'avoid_count' && scheduleChanged(schedule, original, habit.type);
   const scheduleError = scheduleDirty ? validateSchedule(schedule, habit.type) : null;
@@ -127,6 +130,7 @@ function EditForm({ habit }: { habit: Habit }) {
               sort_order: sortOrder,
               // Empty string unlinks the goal
               ...(goalId !== (habit.goal_id ?? null) ? { goal_id: goalId ?? '' } : {}),
+              ...(endDate !== (habit.end_date ?? '') ? (endDate ? { end_date: endDate } : { clear_end_date: true }) : {}),
               ...(habit.type === 'build_yesno' ? { metric_label: logNumber ? (habit.metric_label ?? habit.name) : '' } : {}),
             }
           : undefined,
@@ -278,6 +282,12 @@ function EditForm({ habit }: { habit: Habit }) {
               <CategorySuggestions value={category} suggestions={suggestions} onPick={setCategory} />
             </View>
           </FormSection>
+
+          {!archived ? (
+            <FormSection title="End date" hint="Optional. The habit stops showing after this day. Leave it empty to keep going until you delete it.">
+              <EndDateField value={endDate} onChange={setEndDate} min={today()} />
+            </FormSection>
+          ) : null}
 
           <FormSection title="Goal" hint="Optional. The goal this habit helps with.">
             <GoalLinkField value={goalId} onChange={setGoalId} />

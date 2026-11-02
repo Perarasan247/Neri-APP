@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { BarChart3, Plus, Target } from 'lucide-react-native';
@@ -17,8 +17,8 @@ import {
   Screen,
   Segmented,
 } from '@/components/ui';
+import { useToday } from '@/hooks/useToday';
 import { useCurrentGoals, useGoals, useUpdateGoal } from '@/hooks/queries';
-import { today } from '@/lib/format';
 import { LEVEL_META, snapPeriod } from '@/lib/goals';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -43,11 +43,20 @@ const isLevel = (v?: string): v is GoalLevel => v === 'weekly' || v === 'monthly
 export default function GoalsScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ level?: string }>();
-  const ref = today();
+  const ref = useToday();
   const [level, setLevel] = useState<GoalLevel>(isLevel(params.level) ? params.level : 'weekly');
   // Any date inside the viewed period; kept across level switches so Week → Month stays in the same place
   const [anchor, setAnchor] = useState(ref);
   const [filter, setFilter] = useState<Filter>('open');
+
+  // When a new week/month/year begins, follow it if the user was looking at the current one
+  const prevRef = useRef(ref);
+  useEffect(() => {
+    const before = prevRef.current;
+    prevRef.current = ref;
+    if (before === ref) return;
+    setAnchor((a) => (snapPeriod(level, a) === snapPeriod(level, before) ? ref : a));
+  }, [ref, level]);
 
   const start = snapPeriod(level, anchor);
   const q = useGoals({ level, period: start, status: filter });

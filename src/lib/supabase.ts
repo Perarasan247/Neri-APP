@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 
 import { config, isSupabaseConfigured } from './config';
+import { parseStoredSessionUser, type StoredSessionUser } from './storedSession';
 
 /**
  * Supabase client (see docs.expo.dev/guides/using-supabase). Sessions persist
@@ -21,6 +22,16 @@ export const supabase = createClient(
     },
   },
 );
+
+/** The account in the session saved on this device (works offline, even if its access token expired). */
+export function readStoredSessionUser(): StoredSessionUser | null {
+  try {
+    const key = (supabase.auth as unknown as { storageKey?: string }).storageKey;
+    return key && typeof localStorage !== 'undefined' ? parseStoredSessionUser(localStorage.getItem(key)) : null;
+  } catch {
+    return null;
+  }
+}
 
 if (isSupabaseConfigured) {
   // Refresh tokens only while the app is in the foreground

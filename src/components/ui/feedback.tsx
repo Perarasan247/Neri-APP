@@ -60,9 +60,10 @@ export function ErrorState({ error, onRetry, style }: { error: unknown; onRetry?
 
 /** Pulsing placeholder blocks while the first load is in flight. */
 export function Skeleton({ height = 16, width = '100%', style }: { height?: number; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
-  const { colors } = useTheme();
+  const { colors, reduceMotion } = useTheme();
   const [opacity] = useState(() => new Animated.Value(0.5));
   useEffect(() => {
+    if (reduceMotion) return; // a still placeholder instead of a pulse
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
@@ -71,7 +72,7 @@ export function Skeleton({ height = 16, width = '100%', style }: { height?: numb
     );
     loop.start();
     return () => loop.stop();
-  }, [opacity]);
+  }, [opacity, reduceMotion]);
   return <Animated.View style={[{ height, width, borderRadius: radius.sm, backgroundColor: colors.mutedStrong, opacity }, style]} />;
 }
 

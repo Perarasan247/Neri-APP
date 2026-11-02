@@ -3,7 +3,7 @@
  * Screens never call these directly: they go through the hooks in
  * src/hooks/queries.ts so caching and invalidation stay consistent.
  */
-import { ApiError, request } from './client';
+import { ApiError, request, requestText } from './client';
 import type {
   ChecklistItem,
   DashboardInsights,
@@ -66,6 +66,8 @@ export interface CreateHabitInput {
   metric_label?: string;
   metric_unit?: string;
   goal_id?: string;
+  /** Optional last day (inclusive). Omit to run until deleted. */
+  end_date?: string;
   schedule: ScheduleInput;
 }
 
@@ -80,6 +82,10 @@ export interface HabitCosmeticsInput {
   metric_unit?: string;
   /** Empty string unlinks the goal. */
   goal_id?: string;
+  /** New last day (today or later). */
+  end_date?: string;
+  /** Remove the end date. */
+  clear_end_date?: boolean;
 }
 
 export const getHabits = (status?: 'active' | 'archived') =>
@@ -120,8 +126,8 @@ export const incrementLog = (habit_id: string, log_date: string, delta: number) 
 /* ---------- Rest days ---------- */
 
 /** Log a measurement (e.g. pages read). Several per day add up, and the day counts as done. */
-export const addValueEntry = (habit_id: string, entry_date: string, value: number) =>
-  request<unknown>('POST', '/values', { body: { habit_id, entry_date, value } });
+export const addValueEntry = (habit_id: string, entry_date: string, value: number, client_id?: string) =>
+  request<unknown>('POST', '/values', { body: { habit_id, entry_date, value, client_id } });
 
 export const createDaySkip = (skip_date: string, reason?: string) =>
   request<unknown>('POST', '/skips', { body: { skip_date, reason } });
@@ -168,6 +174,8 @@ export interface TodoQuery {
 }
 
 export interface TodoInput {
+  /** Id chosen by the app (offline creates); the server uses it as the row id, so retries never duplicate. */
+  client_id?: string;
   title: string;
   description?: string;
   due_date?: string;
@@ -262,4 +270,37 @@ export const carryGoal = (goalId: string, period_start?: string) =>
 export const getGoalInsights = ({ range, year, startDate, endDate }: InsightsRange) =>
   request<GoalInsights>('GET', '/goals/insights', {
     query: { time_filter: range, year, start_date: startDate, end_date: endDate },
+  });
+
+/* ---------- Export & import ---------- */
+
+export type ExportKind = 'json' | 'logs' | 'tasks';
+
+/** Full backup (JSON) or a CSV of habit logs / tasks, as text ready to be saved to a file. */
+export const exportData = (kind: ExportKind) =>
+  requestText('/export', kind === 'json' ? { format: 'json' } : { format: 'csv', dataset: kind });
+
+export type ImportFormat = 'auto' | 'neri_json' | 'long_csv' | 'wide_csv';
+
+export interface ImportReport {
+  format: string;
+  dry_run: boolean;
+  habits_created: number;
+  habits_matched: number;
+  logs_created: number;
+  logs_skipped: number;
+  value_entries_created: number;
+  rest_days_created: number;
+  goals_created: number;
+  tasks_created: number;
+  tasks_skipped: number;
+  tracking_start_date_lowered_to: string | null;
+  warnings: string[];
+  errors: string[];
+}
+
+/** `dryRun: true` reports what would happen without changing anything. */
+export const importData = (content: string, opts: { filename?: string; format?: ImportFormat; dryRun?: boolean } = {}) =>
+  request<ImportReport>('POST', '/import', {
+    body: { content, filename: opts.filename, format: opts.format ?? 'auto', dry_run: opts.dryRun ?? false },
   });

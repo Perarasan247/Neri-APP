@@ -17,7 +17,7 @@ import {
   Square,
 } from 'lucide-react-native';
 
-import { ActionSheet, ErrorState, Fab, IconButton, Text, useDisclosure, type MenuOption } from '@/components/ui';
+import { ActionSheet, ErrorState, Fab, IconButton, ListSkeleton, Text, useDisclosure, type MenuOption } from '@/components/ui';
 import { usePickers } from '@/components/tasks/DatePickerSheet';
 import { MonthView } from '@/components/calendar/MonthView';
 import { ScheduleView } from '@/components/calendar/ScheduleView';
@@ -299,6 +299,7 @@ export default function CalendarScreen() {
   const body = (() => {
     if (view === 'schedule') return <ScheduleView today={ref} selected={selected} onSelect={setSelected} onAdd={addOn} />;
     if (query.error && !query.data) return <ErrorState error={query.error} onRetry={() => query.refetch()} />;
+    if (query.isPending) return <View style={{ paddingHorizontal: space.lg, paddingTop: space.lg }}><ListSkeleton rows={6} /></View>;
     if (view === 'month') {
       const d = parseISODate(anchor);
       return (

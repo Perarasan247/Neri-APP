@@ -13,23 +13,23 @@ import { requestWidgetUpdate, type WidgetTaskHandlerProps } from 'react-native-a
 import { today } from '@/lib/format';
 
 import { ACTIONS, renderNeriWidget, WIDGET_NAME } from './NeriWidget';
-import { clearViewState, readViewState, writeViewState, type WidgetSnapshot } from './store';
+import { clearViewState, readViewState, readWidgetAccent, writeViewState, type WidgetSnapshot } from './store';
 import { enqueue, loadView, syncWidgetData } from './sync';
 
 /** Today in the user's timezone (loadView() sets it from the snapshot). */
 const now = (s: WidgetSnapshot | null) => (s ? today(s.timezone) : today());
 
 async function draw(props: WidgetTaskHandlerProps) {
-  const [snapshot, state] = await Promise.all([loadView(), readViewState(props.widgetInfo.widgetId)]);
-  props.renderWidget(renderNeriWidget(snapshot, state, now(snapshot), props.widgetInfo));
+  const [snapshot, state, accent] = await Promise.all([loadView(), readViewState(props.widgetInfo.widgetId), readWidgetAccent()]);
+  props.renderWidget(renderNeriWidget(snapshot, state, now(snapshot), props.widgetInfo, accent));
 }
 
 /** Redraw every Neri widget on the home screen (used from the app and after a sync). */
 export async function updateAllWidgets(): Promise<void> {
-  const snapshot = await loadView();
+  const [snapshot, accent] = await Promise.all([loadView(), readWidgetAccent()]);
   await requestWidgetUpdate({
     widgetName: WIDGET_NAME,
-    renderWidget: async (info) => renderNeriWidget(snapshot, await readViewState(info.widgetId), now(snapshot), info),
+    renderWidget: async (info) => renderNeriWidget(snapshot, await readViewState(info.widgetId), now(snapshot), info, accent),
   });
 }
 

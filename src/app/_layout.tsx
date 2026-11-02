@@ -1,23 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClientProvider } from '@tanstack/react-query';
 
+import { AnimatedSplash } from '@/components/AnimatedSplash';
 import { ServerUrlSheet } from '@/components/account/ServerUrlSheet';
 import { GoalPromptHost } from '@/components/goals/GoalPromptHost';
+import { SyncBanner } from '@/components/SyncBanner';
 import { Button, DialogProvider, ErrorState, Text, ToastProvider, useDisclosure } from '@/components/ui';
 import { useProfile } from '@/hooks/queries';
 import { SessionProvider, useSession } from '@/hooks/session';
 import { config, loadApiUrlOverride } from '@/lib/config';
+import { outbox, restoreQueryCache, startSync } from '@/offline/sync';
 import { setAppTimeZone } from '@/lib/format';
 import { queryClient } from '@/lib/queryClient';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
-import { useWidgetSync } from '@/widget/useWidgetSync';
+import { useWidgetAccent, useWidgetSync } from '@/widget/useWidgetSync';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/** Shown by expo-router when a screen crashes while rendering, instead of a red/blank screen. */
+export function ErrorBoundary({ retry }: { error: Error; retry: () => Promise<void> }) {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#0b0b0f' }}>
+      <Text variant="title" center style={{ color: '#ededf2' }}>
+        Something went wrong
+      </Text>
+      <Text variant="small" center style={{ color: '#9696a6', marginTop: 6, marginBottom: 16 }}>
+        Neri hit an unexpected problem. Your data is safe.
+      </Text>
+      <Button title="Try again" onPress={() => retry()} />
+    </View>
+  );
+}
 
 // Deep links (e.g. the widget's "+" → neri://task/new) land on top of the tabs, so closing returns to the app
 export const unstable_settings = { anchor: '(tabs)' };
@@ -26,7 +44,8 @@ export default function RootLayout() {
   const [configReady, setConfigReady] = useState(false);
 
   useEffect(() => {
-    loadApiUrlOverride().finally(() => setConfigReady(true));
+    // Saved settings, queued offline changes and the saved data cache are all read before the first screen
+    Promise.all([loadApiUrlOverride(), outbox.load(), restoreQueryCache()]).finally(() => setConfigReady(true));
   }, []);
 
   if (!configReady) return null;
@@ -50,41 +69,68 @@ export default function RootLayout() {
 
 /** Auth gate: signed out → sign-in, not onboarded → onboarding, else the app. */
 function AppNavigator() {
-  const { colors, scheme } = useTheme();
+  const { colors, accent } = useTheme();
   const { status } = useSession();
   useWidgetSync(status);
+  useWidgetAccent(accent);
+
+  // While signed in: watch the connection, send queued changes, keep the data cache saved
+  useEffect(() => {
+    if (status !== 'signedIn') return;
+    return startSync();
+  }, [status]);
   const signedIn = status === 'signedIn';
   const profile = useProfile(signedIn);
-  const serverSheet = useDisclosure();
 
   const resolving = status === 'loading' || (signedIn && profile.isPending);
-  const onboarded = Boolean(profile.data);
 
   useEffect(() => {
     if (profile.data) setAppTimeZone(profile.data.timezone);
   }, [profile.data]);
 
-  useEffect(() => {
-    if (!resolving) SplashScreen.hideAsync().catch(() => {});
-  }, [resolving]);
+  // The navigator must never be unmounted once it exists: removing and re-creating the root stack at
+  // runtime (e.g. when the profile is fetched right after signing in) leaves a blank screen and the
+  // "REMOVE_ROUTES was not handled by any navigator" error. So it is mounted once the first state is
+  // known, then stays; later waits are covered by an overlay instead.
+  const [appMounted, setAppMounted] = useState(false);
+  if (!resolving && !appMounted) setAppMounted(true);
 
-  if (resolving) return <View style={{ flex: 1, backgroundColor: colors.canvas }} />;
+  // The native splash is hidden by <AnimatedSplash>, which plays over the app until it's ready
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.canvas }}>
+      {appMounted || !resolving ? <AppContent resolving={resolving} /> : null}
+      <AnimatedSplash ready={!resolving} />
+    </View>
+  );
+}
 
-  // Signed in but the server is unreachable: don't guess, let the user retry or fix the address
-  if (signedIn && profile.isError) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.canvas, justifyContent: 'center', alignItems: 'center' }}>
-        <ErrorState error={profile.error} onRetry={() => profile.refetch()} />
-        <Text variant="caption" tone="subtle" center>
-          Server: {config.apiUrl}
-        </Text>
-        <Button title="Change server address" variant="ghost" onPress={serverSheet.show} style={{ marginTop: 8 }} />
-        {serverSheet.open ? (
-          <ServerUrlSheet visible onClose={serverSheet.hide} onSaved={() => profile.refetch()} />
-        ) : null}
-      </View>
-    );
-  }
+function AppContent({ resolving }: { resolving: boolean }) {
+  const { colors, scheme, reduceMotion } = useTheme();
+  const { status } = useSession();
+  const signedIn = status === 'signedIn';
+  const profile = useProfile(signedIn);
+  const serverSheet = useDisclosure();
+  const onboarded = Boolean(profile.data);
+
+  // Signed in but the server is unreachable and nothing is saved on the device: don't guess, let the
+  // user retry or fix the address. (With a saved copy of the profile we carry on and work offline.)
+  // Shown over the navigator rather than instead of it, so the navigator is never unmounted.
+  const failed = signedIn && profile.isError && !profile.data;
+  const cover = failed ? (
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas, justifyContent: 'center', alignItems: 'center' }]}>
+      <ErrorState error={profile.error} onRetry={() => profile.refetch()} />
+      <Text variant="caption" tone="subtle" center>
+        Server: {config.apiUrl}
+      </Text>
+      <Button title="Change server address" variant="ghost" onPress={serverSheet.show} style={{ marginTop: 8 }} />
+      {serverSheet.open ? <ServerUrlSheet visible onClose={serverSheet.hide} onSaved={() => profile.refetch()} /> : null}
+    </View>
+  ) : resolving ? (
+    // e.g. the profile loading right after signing in
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas, justifyContent: 'center', alignItems: 'center' }]}>
+      <ActivityIndicator color={colors.accent} />
+    </View>
+  ) : null;
 
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
@@ -104,6 +150,7 @@ function AppNavigator() {
     <NavThemeProvider value={navTheme}>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       {signedIn && onboarded ? <GoalPromptHost /> : null}
+      {signedIn && onboarded ? <SyncBanner /> : null}
       <Stack
         screenOptions={{
           headerShadowVisible: false,
@@ -112,6 +159,8 @@ function AppNavigator() {
           headerTintColor: colors.accent,
           headerBackButtonDisplayMode: 'minimal',
           contentStyle: { backgroundColor: colors.canvas },
+          // "Reduce motion": screens appear instead of sliding
+          animation: reduceMotion ? 'none' : 'default',
         }}
       >
         <Stack.Protected guard={!signedIn}>
@@ -131,7 +180,7 @@ function AppNavigator() {
             name="task/new"
             options={{
               presentation: 'transparentModal',
-              animation: 'fade',
+              animation: reduceMotion ? 'none' : 'fade',
               headerShown: false,
               contentStyle: { backgroundColor: 'transparent' },
             }}
@@ -151,6 +200,7 @@ function AppNavigator() {
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         </Stack.Protected>
       </Stack>
+      {cover}
     </NavThemeProvider>
   );
 }

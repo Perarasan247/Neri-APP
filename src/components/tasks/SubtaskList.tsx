@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Plus, X } from 'lucide-react-native';
 
+import { AppTextInput } from '@/components/ui/TextInput';
 import type { Subtask } from '@/api/types';
 import { Checkbox, IconButton, requestReveal, Text } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -43,7 +44,7 @@ export function SubtaskList({ subtasks, onChange, color }: SubtaskListProps) {
         <View style={styles.lead}>
           <Plus size={18} color={colors.accent} />
         </View>
-        <TextInput
+        <AppTextInput
           onFocus={requestReveal}
           value={draft}
           onChangeText={setDraft}
@@ -95,7 +96,7 @@ function SubtaskRow({
           label={subtask.completed ? `Mark ${subtask.title} as not done` : `Complete ${subtask.title}`}
         />
       </View>
-      <TextInput
+      <AppTextInput
         onFocus={requestReveal}
         value={title}
         onChangeText={setTitle}

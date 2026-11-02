@@ -1,6 +1,7 @@
 import React from 'react';
-import { Text as RNText, type TextProps as RNTextProps } from 'react-native';
+import { StyleSheet, Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
+import { scaleFont } from '@/theme/appearance';
 import { useTheme } from '@/theme/ThemeProvider';
 import { font, weight as weights, type Colors } from '@/theme/tokens';
 
@@ -43,24 +44,26 @@ export function Text({
   style,
   ...props
 }: TextProps) {
-  const { colors } = useTheme();
+  const { colors, textScale } = useTheme();
   const defaultWeight =
     variant === 'display' || variant === 'heading' ? 'bold' : variant === 'title' ? 'semibold' : 'regular';
-  return (
-    <RNText
-      {...props}
-      style={[
-        font[variant],
-        {
-          color: color ?? colors[toneKey[tone]],
-          fontWeight: weights[weight ?? defaultWeight],
-          letterSpacing: variant === 'display' ? -0.9 : variant === 'heading' ? -0.5 : variant === 'title' ? -0.2 : 0,
-        },
-        center && { textAlign: 'center' },
-        tabular && { fontVariant: ['tabular-nums'] },
-        strike && { textDecorationLine: 'line-through' },
-        style,
-      ]}
-    />
+  const style_ = StyleSheet.flatten([
+    font[variant],
+    {
+      color: color ?? colors[toneKey[tone]],
+      fontWeight: weights[weight ?? defaultWeight],
+      letterSpacing: variant === 'display' ? -0.9 : variant === 'heading' ? -0.5 : variant === 'title' ? -0.2 : 0,
+    },
+    center && { textAlign: 'center' },
+    tabular && { fontVariant: ['tabular-nums'] },
+    strike && { textDecorationLine: 'line-through' },
+    style,
+  ]);
+  // An in-app text size replaces the device's font scaling (never both, or sizes would multiply).
+  // Following the device is capped so fixed-height layouts degrade instead of breaking.
+  return textScale === null ? (
+    <RNText {...props} maxFontSizeMultiplier={props.maxFontSizeMultiplier ?? 2} style={style_} />
+  ) : (
+    <RNText {...props} allowFontScaling={false} style={scaleFont(style_ as { fontSize?: number; lineHeight?: number }, textScale)} />
   );
 }

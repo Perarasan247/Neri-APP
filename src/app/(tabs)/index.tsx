@@ -369,7 +369,7 @@ export default function TodayScreen() {
         <ListSkeleton rows={5} />
       </View>
     );
-  } else if (todayQ.error || !data) {
+  } else if (!data) {
     body = <ErrorState error={todayQ.error} onRetry={() => todayQ.refetch()} />;
   } else {
     // To do first, then finished, then "cut back" habits that are just on track, then skipped
@@ -489,7 +489,7 @@ export default function TodayScreen() {
               />
               {dueQ.isPending ? (
                 <ListSkeleton rows={2} />
-              ) : dueQ.error ? (
+              ) : dueQ.error && !dueQ.data ? (
                 <ErrorState error={dueQ.error} onRetry={() => dueQ.refetch()} style={{ paddingVertical: space.xl }} />
               ) : todos.length === 0 ? (
                 <AddCta

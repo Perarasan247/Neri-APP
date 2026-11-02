@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Minus, Plus } from 'lucide-react-native';
 
+import { AppTextInput } from '@/components/ui/TextInput';
 import { requestReveal, Text } from '@/components/ui';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -66,7 +67,7 @@ export function Stepper({ value, onChange, min = 0, max = 9999, step = 1, decima
   return (
     <View style={styles.row} accessibilityLabel={label}>
       {btn(-1)}
-      <TextInput
+      <AppTextInput
         value={focused ? text : String(value)}
         onFocus={() => {
           setText(String(value));

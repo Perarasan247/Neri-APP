@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { ArrowUp, Check, CheckSquare, ChevronLeft, ChevronRight, Repeat, Target } from 'lucide-react-native';
@@ -6,6 +6,7 @@ import { ArrowUp, Check, CheckSquare, ChevronLeft, ChevronRight, Repeat, Target 
 import type { Goal, GoalLevel } from '@/api/types';
 import { Badge, IconButton, ProgressBar, Text, withAlpha } from '@/components/ui';
 import { haptic } from '@/lib/haptics';
+import { PeriodPickerSheet } from './PeriodPicker';
 import { LEVEL_META, periodLabel, relativePeriod, shiftPeriod, snapPeriod, STATUS_META } from '@/lib/goals';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -228,19 +229,36 @@ export function PeriodNav({
   const { colors } = useTheme();
   const rel = relativePeriod(level, start, today);
   const isCurrent = rel === `This ${LEVEL_META[level].unit}`;
+  const [picking, setPicking] = useState(false);
   return (
     <View style={styles.nav}>
+      <PeriodPickerSheet
+        visible={picking}
+        onClose={() => setPicking(false)}
+        level={level}
+        start={start}
+        today={today}
+        onPick={onChange}
+      />
       <IconButton label={`Previous ${LEVEL_META[level].unit}`} size={34} onPress={() => onChange(shiftPeriod(level, start, -1))}>
         <ChevronLeft size={20} color={colors.fgSoft} />
       </IconButton>
-      <View style={styles.navLabel}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${periodLabel(level, start)}. Pick a ${LEVEL_META[level].unit}`}
+        onPress={() => {
+          haptic.tap();
+          setPicking(true);
+        }}
+        style={({ pressed }) => [styles.navLabel, pressed && { backgroundColor: colors.muted }]}
+      >
         <Text weight="semibold" tabular numberOfLines={1}>
           {periodLabel(level, start)}
         </Text>
         <Text variant="caption" tone={isCurrent ? 'accent' : 'subtle'} numberOfLines={1}>
           {rel ?? ' '}
         </Text>
-      </View>
+      </Pressable>
       <IconButton label={`Next ${LEVEL_META[level].unit}`} size={34} onPress={() => onChange(shiftPeriod(level, start, 1))}>
         <ChevronRight size={20} color={colors.fgSoft} />
       </IconButton>
@@ -317,6 +335,6 @@ const styles = StyleSheet.create({
   tileTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
   dot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
   nav: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  navLabel: { flex: 1, minWidth: 0, alignItems: 'center' },
+  navLabel: { flex: 1, minWidth: 0, alignItems: 'center', borderRadius: radius.md, paddingVertical: 2 },
   reset: { paddingHorizontal: space.sm, paddingVertical: 4, borderRadius: radius.pill },
 });

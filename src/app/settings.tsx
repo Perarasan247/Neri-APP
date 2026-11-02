@@ -12,19 +12,24 @@ import {
   Mail,
   RotateCcw,
   Server,
+  User,
   XCircle,
 } from 'lucide-react-native';
 
+import { AppearanceSettings } from '@/components/account/AppearanceSettings';
+import { DataSettings } from '@/components/account/DataSettings';
+import { SyncSettings } from '@/components/account/SyncSettings';
 import { NavGroup, NavRow } from '@/components/account/NavRow';
 import { ServerUrlSheet, testServer } from '@/components/account/ServerUrlSheet';
 import { zoneLabel } from '@/components/account/TimezonePicker';
-import { Button, Card, Row, Screen, SectionHeader, Segmented, Text, useDialog, useToast } from '@/components/ui';
+import { Button, Card, Row, Screen, SectionHeader, Text, useDialog, useToast } from '@/components/ui';
 import { useProfile } from '@/hooks/queries';
 import { useSession } from '@/hooks/session';
 import { config, setApiUrlOverride } from '@/lib/config';
 import { parseISODate } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
-import { useTheme, type ThemePreference } from '@/theme/ThemeProvider';
+import { useOutboxState } from '@/offline/useOutbox';
+import { useTheme } from '@/theme/ThemeProvider';
 import { space } from '@/theme/tokens';
 
 const ICON = 17;
@@ -36,8 +41,8 @@ const fullDate = (iso: string) =>
   parseISODate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export default function SettingsScreen() {
-  const { colors, preference, setPreference } = useTheme();
-  const { email, isDemo, signOut } = useSession();
+  const { colors } = useTheme();
+  const { email, name, isDemo, signOut } = useSession();
   const profile = useProfile();
   const qc = useQueryClient();
   const toast = useToast();
@@ -81,11 +86,22 @@ export default function SettingsScreen() {
       },
     ]);
 
+  const unsynced = useOutboxState();
+  const waiting = unsynced.pending + unsynced.failed;
   const confirmSignOut = () =>
-    dialog.alert('Sign out?', isDemo ? 'You can come back to the demo any time.' : 'You’ll need your password to sign back in.', [
+    dialog.alert(
+      'Sign out?',
+      [
+        isDemo ? 'You can come back to the demo any time.' : 'You’ll need your password to sign back in.',
+        waiting > 0
+          ? `\n${waiting} change${waiting === 1 ? ' hasn’t' : 's haven’t'} synced yet. They stay on this device and are sent when you sign back in to this account.`
+          : '',
+      ].join(''),
+      [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
-    ]);
+      ],
+    );
 
   const accountEmail = isDemo ? 'Demo account' : profile.data?.email || email || '—';
   const version = Constants.expoConfig?.version ?? '—';
@@ -94,24 +110,9 @@ export default function SettingsScreen() {
     <Screen safeTop={false} onRefresh={() => profile.refetch()} refreshing={profile.isRefetching}>
       <Stack.Screen options={{ title: 'Settings' }} />
 
-      {/* Appearance */}
-      <View style={styles.group}>
-        <SectionHeader title="Appearance" tone="muted" />
-        <Card padded style={{ gap: space.sm }}>
-          <Segmented<ThemePreference>
-            value={preference}
-            onChange={setPreference}
-            options={[
-              { value: 'system', label: 'System' },
-              { value: 'light', label: 'Light' },
-              { value: 'dark', label: 'Dark' },
-            ]}
-          />
-          <Text variant="caption" tone="subtle">
-            System follows your device’s light or dark setting.
-          </Text>
-        </Card>
-      </View>
+      <AppearanceSettings />
+
+      <SyncSettings />
 
       {/* Server */}
       <View style={styles.group}>
@@ -168,6 +169,7 @@ export default function SettingsScreen() {
 
       {/* Account */}
       <NavGroup title="Account">
+        {name && !isDemo ? <NavRow icon={<User size={ICON} color={tint} />} label="Name" value={name} /> : null}
         <NavRow icon={<Mail size={ICON} color={tint} />} label="Email" value={accountEmail} />
         <NavRow
           icon={<Globe size={ICON} color={tint} />}
@@ -191,6 +193,8 @@ export default function SettingsScreen() {
         Your tracking start date and timezone are locked after onboarding so your history stays honest: nothing
         before the start date ever counts against you.
       </Text>
+
+      <DataSettings />
 
       {/* About */}
       <NavGroup title="About">
