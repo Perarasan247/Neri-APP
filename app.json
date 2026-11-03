@@ -64,7 +64,8 @@
           ]
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "./plugins/widget-quick-add/withWidgetQuickAdd.js"
     ],
     "experiments": {
       "typedRoutes": true,

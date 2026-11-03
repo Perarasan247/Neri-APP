@@ -14,7 +14,7 @@ import { FlexWidget, ListWidget, OverlapWidget, SvgWidget, TextWidget } from 're
 import type { WidgetInfo, WidgetRepresentation } from 'react-native-android-widget';
 
 import type { TodoPriority } from '@/api/types';
-import { friendlyDate } from '@/lib/format';
+import { addDays, friendlyDate } from '@/lib/format';
 import { deriveAccent } from '@/theme/accent';
 
 import type { WidgetHabit, WidgetSnapshot, WidgetTask, WidgetViewState } from './store';
@@ -28,7 +28,39 @@ export const ACTIONS = {
   habit: 'HABIT_TAP',
   task: 'TASK_TAP',
   refresh: 'REFRESH',
+  /** Sent by the native quick-add popup (plugins/widget-quick-add), not by a widget tap. */
+  quickAdd: 'QUICK_ADD',
 } as const;
+
+/**
+ * Rows drawn per list. The library paints every row to a bitmap (twice, light
+ * and dark), so a long list makes every tap slow; the rest is one tap away in the app.
+ */
+export const MAX_ROWS = 25;
+
+/** Where the quick-add popup sends what the user typed; opened without starting the app. */
+export interface QuickAdd {
+  widgetId: number;
+  accentLight: string;
+  accentDark: string;
+}
+
+/** Deep link handled by QuickAddActivity (a small dialog over the home screen). */
+export function quickAddUri(q: QuickAdd, kind: 'habit' | 'task', now: string, date: 'today' | 'none' = 'none') {
+  const params: Record<string, string> = {
+    kind,
+    widget: String(q.widgetId),
+    today: now,
+    tomorrow: addDays(now, 1),
+    date,
+    accent: q.accentLight,
+    accentDark: q.accentDark,
+  };
+  const query = Object.entries(params)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+  return `neri-widget://add?${query}`;
+}
 
 /* ---------- Theme ---------- */
 
@@ -176,6 +208,23 @@ function SectionHeader({ label, color, t }: { label: string; color?: Hex; t: Wid
   );
 }
 
+/** Keep a list to MAX_ROWS rows; the last row says how many more there are and opens the app. */
+function capped(rows: React.JSX.Element[], t: WidgetTheme, uri: string): React.JSX.Element[] {
+  if (rows.length <= MAX_ROWS) return rows;
+  const more = rows.slice(MAX_ROWS).filter((r) => !String(r.key).startsWith('h-')).length;
+  return [
+    ...rows.slice(0, MAX_ROWS),
+    <FlexWidget
+      key="more"
+      clickAction="OPEN_URI"
+      clickActionData={{ uri }}
+      style={{ width: 'match_parent', alignItems: 'center', paddingVertical: 10 }}
+    >
+      <TextWidget text={`${more} more · open Neri`} style={{ fontSize: 12, fontWeight: '600', color: t.accent }} />
+    </FlexWidget>,
+  ];
+}
+
 /* ---------- Habits page ---------- */
 
 const streakLabel = (h: WidgetHabit) =>
@@ -232,10 +281,9 @@ function HabitRow({ h, t }: { h: WidgetHabit; t: WidgetTheme }) {
   );
 }
 
-function HabitsPage({ s, t, compact }: { s: WidgetSnapshot; t: WidgetTheme; compact: boolean }) {
+function HabitsPage({ s, t, compact, addUri }: { s: WidgetSnapshot; t: WidgetTheme; compact: boolean; addUri: string }) {
   if (s.isRestDay) return <Empty t={t} title="Rest day 🌿" subtitle="No habits today. Enjoy the break." />;
-  if (s.habits.length === 0)
-    return <Empty t={t} title="No habits due today" subtitle="Tap + to add a habit" uri="neri://habit/new" />;
+  if (s.habits.length === 0) return <Empty t={t} title="No habits due today" subtitle="Tap + to add a habit" uri={addUri} />;
 
   const done = s.habits.filter((h) => h.done).length;
   const total = s.habits.length;
@@ -276,9 +324,11 @@ function HabitsPage({ s, t, compact }: { s: WidgetSnapshot; t: WidgetTheme; comp
     <FlexWidget style={{ width: 'match_parent', height: 'match_parent', flexDirection: 'column' }}>
       {progress}
       <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
-        {s.habits.map((h) => (
-          <HabitRow key={h.id} h={h} t={t} />
-        ))}
+        {capped(
+          s.habits.map((h) => <HabitRow key={h.id} h={h} t={t} />),
+          t,
+          'neri://',
+        )}
       </ListWidget>
     </FlexWidget>
   );
@@ -345,7 +395,19 @@ function inboxRows(tasks: WidgetTask[], t: WidgetTheme, now: string) {
   return rows;
 }
 
-function TasksPage({ s, t, view, now }: { s: WidgetSnapshot; t: WidgetTheme; view: 'today' | 'inbox'; now: string }) {
+function TasksPage({
+  s,
+  t,
+  view,
+  now,
+  addUri,
+}: {
+  s: WidgetSnapshot;
+  t: WidgetTheme;
+  view: 'today' | 'inbox';
+  now: string;
+  addUri: string;
+}) {
   const overdue = s.today.filter((x) => x.date !== null && x.date < now);
   const planned = s.today.filter((x) => x.date === null || x.date >= now);
   const todayOpen = s.today.filter((x) => !x.done).length;
@@ -362,20 +424,24 @@ function TasksPage({ s, t, view, now }: { s: WidgetSnapshot; t: WidgetTheme; vie
   if (view === 'inbox') {
     body =
       s.inbox.length === 0 ? (
-        <Empty t={t} title="Inbox zero 🎉" subtitle="Tap + to add a task" uri="neri://task/new" />
+        <Empty t={t} title="Inbox zero 🎉" subtitle="Tap + to add a task" uri={addUri} />
       ) : (
-        <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>{inboxRows(s.inbox, t, now)}</ListWidget>
+        <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
+          {capped(inboxRows(s.inbox, t, now), t, 'neri://inbox')}
+        </ListWidget>
       );
   } else if (s.today.length === 0) {
-    body = <Empty t={t} title="Nothing planned today" subtitle="Tap + to add a task" uri={`neri://task/new?date=${now}`} />;
+    body = <Empty t={t} title="Nothing planned today" subtitle="Tap + to add a task" uri={addUri} />;
   } else if (todayOpen === 0 && overdue.length === 0) {
     body = (
       <FlexWidget style={{ width: 'match_parent', height: 'match_parent', flexDirection: 'column' }}>
         <TextWidget text="All done today 🎉" style={{ fontSize: 14, fontWeight: '700', color: t.success, marginBottom: 4, marginLeft: 4 }} />
         <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
-          {planned.map((task) => (
-            <TaskRow key={task.id} task={task} t={t} now={now} showDate={false} />
-          ))}
+          {capped(
+            planned.map((task) => <TaskRow key={task.id} task={task} t={t} now={now} showDate={false} />),
+            t,
+            'neri://',
+          )}
         </ListWidget>
       </FlexWidget>
     );
@@ -387,7 +453,7 @@ function TasksPage({ s, t, view, now }: { s: WidgetSnapshot; t: WidgetTheme; vie
       rows.push(<SectionHeader key="h-today" label="Today" t={t} />);
     }
     planned.forEach((task) => rows.push(<TaskRow key={task.id} task={task} t={t} now={now} showDate={false} />));
-    body = <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>{rows}</ListWidget>;
+    body = <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>{capped(rows, t, 'neri://')}</ListWidget>;
   }
 
   return (
@@ -408,9 +474,10 @@ interface Props {
   width: number;
   height: number;
   t: WidgetTheme;
+  quick: QuickAdd;
 }
 
-function NeriWidgetView({ snapshot, state, now, width, height, t }: Props) {
+function NeriWidgetView({ snapshot, state, now, width, height, t, quick }: Props) {
   const root = {
     width: 'match_parent',
     height: 'match_parent',
@@ -435,11 +502,10 @@ function NeriWidgetView({ snapshot, state, now, width, height, t }: Props) {
   }
 
   const onHabits = state.page === 'habits';
+  // Opens the quick-add popup over the home screen, not the app
   const addUri = onHabits
-    ? 'neri://habit/new'
-    : state.taskView === 'today'
-      ? `neri://task/new?date=${now}`
-      : 'neri://task/new';
+    ? quickAddUri(quick, 'habit', now)
+    : quickAddUri(quick, 'task', now, state.taskView === 'today' ? 'today' : 'none');
   const stale = snapshot.date !== now;
   const narrow = width < 230;
 
@@ -480,9 +546,9 @@ function NeriWidgetView({ snapshot, state, now, width, height, t }: Props) {
       ) : null}
 
       {onHabits ? (
-        <HabitsPage s={snapshot} t={t} compact={height < 200} />
+        <HabitsPage s={snapshot} t={t} compact={height < 200} addUri={addUri} />
       ) : (
-        <TasksPage s={snapshot} t={t} view={state.taskView} now={now} />
+        <TasksPage s={snapshot} t={t} view={state.taskView} now={now} addUri={addUri} />
       )}
     </FlexWidget>
   );
@@ -500,12 +566,16 @@ export function renderNeriWidget(
   snapshot: WidgetSnapshot | null,
   state: WidgetViewState,
   now: string,
-  info: Pick<WidgetInfo, 'width' | 'height'>,
+  info: Pick<WidgetInfo, 'width' | 'height'> & { widgetId?: number },
   accent?: string | null,
 ): WidgetRepresentation {
-  const common = { snapshot, state, now, width: info.width, height: info.height };
+  const light = withAccent(LIGHT, accent, 'light');
+  const dark = withAccent(DARK, accent, 'dark');
+  // Both variants get the same links: Android only takes tap targets from the light one
+  const quick: QuickAdd = { widgetId: info.widgetId ?? 0, accentLight: light.accent, accentDark: dark.accent };
+  const common = { snapshot, state, now, width: info.width, height: info.height, quick };
   return {
-    light: <NeriWidgetView {...common} t={withAccent(LIGHT, accent, 'light')} />,
-    dark: <NeriWidgetView {...common} t={withAccent(DARK, accent, 'dark')} />,
+    light: <NeriWidgetView {...common} t={light} />,
+    dark: <NeriWidgetView {...common} t={dark} />,
   };
 }

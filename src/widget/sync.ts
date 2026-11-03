@@ -15,6 +15,7 @@ import {
   applyQueue,
   readQueue,
   readSnapshot,
+  renameHabit,
   serial,
   writeQueue,
   writeSnapshot,
@@ -24,7 +25,8 @@ import {
   type WidgetTask,
 } from './store';
 
-const INBOX_LIMIT = 150;
+/** The widget only draws the first rows of a list (see MAX_ROWS); keep a little headroom for ticks. */
+const INBOX_LIMIT = 60;
 
 let configLoaded: Promise<void> | null = null;
 /** The headless task starts without the app's startup work, so load the saved server URL once. */
@@ -128,14 +130,34 @@ async function fetchSnapshot(prev: WidgetSnapshot | null): Promise<WidgetSnapsho
 
 /* ---------- Pending taps ---------- */
 
-function send(a: WidgetAction): Promise<unknown> {
+/** Sends one queued action. Resolves to the new habit's id for `habit_create`. */
+async function send(a: WidgetAction): Promise<string | void> {
   switch (a.kind) {
     case 'habit_set':
-      return api.upsertLog({ habit_id: a.habitId, log_date: a.date, count: a.done ? 1 : 0, status: 'done' });
+      await api.upsertLog({ habit_id: a.habitId, log_date: a.date, count: a.done ? 1 : 0, status: 'done' });
+      return;
     case 'habit_inc':
-      return api.incrementLog(a.habitId, a.date, a.delta);
+      await api.incrementLog(a.habitId, a.date, a.delta);
+      return;
     case 'todo_toggle':
-      return api.toggleTodo(a.todoId);
+      await api.toggleTodo(a.todoId);
+      return;
+    case 'todo_create':
+      await api.createTodo({ client_id: a.clientId, title: a.title, ...(a.date ? { due_date: a.date } : {}) });
+      return;
+    case 'habit_create': {
+      // Same defaults as the app's "New habit" form, every day
+      const habit = await api.createHabit({
+        name: a.name,
+        type: a.target ? 'build_count' : 'build_yesno',
+        start_date: a.date,
+        color: a.color,
+        icon: 'Target',
+        category: 'Personal',
+        schedule: { frequency_type: 'daily', weekdays: [1, 2, 3, 4, 5], target_count: 3, daily_target: a.target ?? 1, effective_from: a.date },
+      });
+      return habit.id;
+    }
   }
 }
 
@@ -156,8 +178,9 @@ export function flushQueue(): Promise<number> {
       const [next] = await serial(readQueue);
       if (!next) break;
       let accepted = true;
+      let createdId: string | void = undefined;
       try {
-        await send(next);
+        createdId = await send(next);
         sent++;
       } catch (e) {
         if (!isPermanent(e)) break; // offline or signed out: keep it for later
@@ -165,9 +188,15 @@ export function flushQueue(): Promise<number> {
       }
       // Bake the confirmed tap into the snapshot so the widget doesn't flicker back before the next fetch
       await serial(async () => {
-        await writeQueue((await readQueue()).filter((a) => a.id !== next.id));
+        let rest = (await readQueue()).filter((a) => a.id !== next.id);
+        let done = next;
+        if (next.kind === 'habit_create' && createdId) {
+          rest = renameHabit(rest, next.tempId, createdId);
+          done = { ...next, tempId: createdId };
+        }
+        await writeQueue(rest);
         const snap = await readSnapshot();
-        if (snap && accepted) await writeSnapshot(applyAction(snap, next));
+        if (snap && accepted) await writeSnapshot(applyAction(snap, done));
       });
     }
     return sent;

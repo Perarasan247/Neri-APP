@@ -103,7 +103,17 @@ function EditForm({ habit }: { habit: Habit }) {
     endDate !== (habit.end_date ?? '') ||
     (habit.type === 'build_yesno' && logNumber !== !!habit.metric_label);
   const scheduleDirty = habit.type !== 'avoid_count' && scheduleChanged(schedule, original, habit.type);
-  const scheduleError = scheduleDirty ? validateSchedule(schedule, habit.type) : null;
+  // A schedule change has to fall inside the habit's life: from its first day to its last (if it has one)
+  const lastPeriod = [...habit.periods].sort((a, b) => a.start_date.localeCompare(b.start_date)).pop();
+  const finalDay = archived ? (lastPeriod?.end_date ?? '') : endDate;
+  const effectiveError = !scheduleDirty
+    ? null
+    : effectiveFrom < firstStart
+      ? 'The new schedule can’t start before the habit did.'
+      : finalDay && effectiveFrom > finalDay
+        ? 'The new schedule can’t start after the habit’s last day.'
+        : null;
+  const scheduleError = scheduleDirty ? (validateSchedule(schedule, habit.type) ?? effectiveError) : null;
   const dirty = cosmeticsDirty || scheduleDirty;
   const busy = update.isPending || remove.isPending;
 
@@ -325,6 +335,8 @@ function EditForm({ habit }: { habit: Habit }) {
                       value={effectiveFrom}
                       onChange={setEffectiveFrom}
                       min={firstStart}
+                      max={finalDay || undefined}
+                      invalid={Boolean(effectiveError)}
                       title="Effective from"
                     />
                   </Field>

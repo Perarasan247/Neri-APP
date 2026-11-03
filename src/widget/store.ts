@@ -63,7 +63,11 @@ export interface WidgetSnapshot {
 export type WidgetActionInput =
   | { kind: 'habit_set'; habitId: string; date: string; done: boolean }
   | { kind: 'habit_inc'; habitId: string; date: string; delta: number }
-  | { kind: 'todo_toggle'; todoId: string };
+  | { kind: 'todo_toggle'; todoId: string }
+  /** From the widget's quick-add popup. `clientId` becomes the server's row id. */
+  | { kind: 'todo_create'; clientId: string; title: string; date: string | null }
+  /** `tempId` is swapped for the server's id once the habit is created. */
+  | { kind: 'habit_create'; tempId: string; name: string; date: string; target: number | null; color: string };
 
 export type WidgetAction = { id: string; at: number } & WidgetActionInput;
 
@@ -167,7 +171,41 @@ export function applyAction(s: WidgetSnapshot, a: WidgetAction): WidgetSnapshot 
       const flip = (list: WidgetTask[]) => list.map((t) => (t.id === a.todoId ? { ...t, done: !t.done } : t));
       return { ...s, today: flip(s.today), inbox: flip(s.inbox) };
     }
+    case 'todo_create': {
+      if (s.inbox.some((t) => t.id === a.clientId)) return s;
+      const task: WidgetTask = { id: a.clientId, title: a.title, date: a.date, time: null, priority: 'medium', done: false };
+      // Inbox is ordered by day, undated last: insert before the first task planned later
+      const at = s.inbox.findIndex((t) => (task.date === null ? false : t.date === null || t.date > task.date));
+      const inbox = at < 0 ? [...s.inbox, task] : [...s.inbox.slice(0, at), task, ...s.inbox.slice(at)];
+      const today = task.date !== null && task.date <= s.date ? [...s.today, task] : s.today;
+      return { ...s, inbox, today };
+    }
+    case 'habit_create': {
+      if (a.date !== s.date || s.habits.some((h) => h.id === a.tempId)) return s;
+      const habit: WidgetHabit = {
+        id: a.tempId,
+        name: a.name,
+        color: a.color,
+        type: a.target ? 'build_count' : 'build_yesno',
+        done: false,
+        count: 0,
+        target: a.target,
+        streak: 0,
+        streakUnit: 'day',
+        opensApp: false,
+      };
+      return { ...s, habits: [...s.habits, habit] };
+    }
   }
+}
+
+/** Point queued taps on a just-created habit at its real id. */
+export function renameHabit(q: WidgetAction[], from: string, to: string): WidgetAction[] {
+  return q.map((a) => {
+    if ((a.kind === 'habit_set' || a.kind === 'habit_inc') && a.habitId === from) return { ...a, habitId: to };
+    if (a.kind === 'habit_create' && a.tempId === from) return { ...a, tempId: to };
+    return a;
+  });
 }
 
 export const applyQueue = (s: WidgetSnapshot, q: WidgetAction[]) => q.reduce(applyAction, s);

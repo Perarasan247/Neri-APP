@@ -16,7 +16,7 @@ import { writeWidgetAccent } from './store';
 import { markSignedOut, syncWidgetData } from './sync';
 import { updateAllWidgets } from './taskHandler';
 
-const DEBOUNCE_MS = 1200;
+const DEBOUNCE_MS = 500;
 
 /** Tell the home-screen widget which accent colour the app uses, and redraw it when that changes. */
 export function useWidgetAccent(accent: string | null) {

@@ -3,8 +3,8 @@
  * page/state through the library's own tree builder (the same validation that
  * runs before Android draws the widget).
  */
-import { renderNeriWidget } from '../NeriWidget';
-import { applyAction, applyQueue, DEFAULT_VIEW_STATE, type WidgetAction, type WidgetSnapshot } from '../store';
+import { MAX_ROWS, quickAddUri, renderNeriWidget } from '../NeriWidget';
+import { applyAction, applyQueue, DEFAULT_VIEW_STATE, renameHabit, type WidgetAction, type WidgetSnapshot } from '../store';
 
 // Hoisted above the imports by Jest: the widget library only needs a few React Native stubs
 jest.mock('react-native', () => ({
@@ -73,6 +73,47 @@ describe('optimistic updates', () => {
     expect(once.inbox[1].done).toBe(true);
     expect(applyQueue(snapshot(), [tap, tap]).today[1].done).toBe(false);
   });
+
+  it('adds a quick-added task to today and the inbox, in date order', () => {
+    const s = applyAction(snapshot(), act({ kind: 'todo_create', clientId: 'n1', title: 'New', date: NOW }));
+    expect(s.today.map((t) => t.id)).toEqual(['t0', 't1', 'n1']);
+    expect(s.inbox.map((t) => t.id)).toEqual(['t0', 't1', 'n1', 't2', 't3']);
+    // Idempotent: replaying it (queue + confirmed snapshot) doesn't duplicate it
+    expect(applyAction(s, act({ kind: 'todo_create', clientId: 'n1', title: 'New', date: NOW }))).toBe(s);
+  });
+
+  it('puts an undated quick-added task at the end of the inbox only', () => {
+    const s = applyAction(snapshot(), act({ kind: 'todo_create', clientId: 'n2', title: 'Later', date: null }));
+    expect(s.today).toHaveLength(2);
+    expect(s.inbox.at(-1)?.id).toBe('n2');
+  });
+
+  it('adds a quick-added habit, then follows it to its real id', () => {
+    const create = act({ kind: 'habit_create', tempId: 'tmp-1', name: 'Stretch', date: NOW, target: 3, color: '#635bff' });
+    const tick = { ...act({ kind: 'habit_inc', habitId: 'tmp-1', date: NOW, delta: 1 }), id: 'y' } as WidgetAction;
+    const s = applyQueue(snapshot(), [create, tick]);
+    expect(s.habits.at(-1)).toMatchObject({ id: 'tmp-1', name: 'Stretch', type: 'build_count', count: 1, target: 3, done: false });
+
+    const renamed = renameHabit([tick], 'tmp-1', 'real-1');
+    expect(renamed[0]).toMatchObject({ kind: 'habit_inc', habitId: 'real-1' });
+  });
+});
+
+describe('quick add', () => {
+  it('links the + button to the popup, not the app', () => {
+    const uri = quickAddUri({ widgetId: 7, accentLight: '#635bff', accentDark: '#7c74ff' }, 'task', NOW, 'today');
+    expect(uri.startsWith('neri-widget://add?')).toBe(true);
+    const q = new URLSearchParams(uri.split('?')[1]);
+    expect(Object.fromEntries(q)).toEqual({
+      kind: 'task',
+      widget: '7',
+      today: NOW,
+      tomorrow: '2026-11-02',
+      date: 'today',
+      accent: '#635bff',
+      accentDark: '#7c74ff',
+    });
+  });
 });
 
 describe('rendering', () => {
@@ -119,6 +160,14 @@ describe('rendering', () => {
     const t = render(snapshot(), { page: 'tasks', taskView: 'inbox' });
     const headers = t.filter((x) => x === x.toUpperCase() && /[A-Z]/.test(x));
     expect(headers).toEqual(['OVERDUE', 'TODAY', 'THURSDAY', 'NO DATE']);
+  });
+
+  it('draws at most MAX_ROWS rows and says how many more there are', () => {
+    const many = Array.from({ length: MAX_ROWS + 10 }, (_, i) => ({ ...snapshot().inbox[3], id: `m${i}`, title: `Task ${i}` }));
+    const t = render(snapshot({ inbox: many }), { page: 'tasks', taskView: 'inbox' });
+    expect(t).toContain(`Task ${MAX_ROWS - 2}`);
+    expect(t).not.toContain(`Task ${MAX_ROWS + 5}`);
+    expect(t).toContain('11 more · open Neri');
   });
 
   it('splits Today into overdue and today', () => {
