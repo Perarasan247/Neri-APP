@@ -70,11 +70,7 @@ export default function NewHabitScreen() {
   const nameError = submitted && !name.trim() ? 'Give your habit a name.' : null;
   const scheduleError = submitted ? validateSchedule(schedule, type) : null;
   const dateError =
-    startDate > todayStr
-      ? 'Start date can’t be in the future.'
-      : trackingStart && startDate < trackingStart
-        ? 'Start date can’t be before your tracking start date.'
-        : null;
+    trackingStart && startDate < trackingStart ? 'Start date can’t be before your tracking start date.' : null;
   const endMin = startDate > todayStr ? startDate : todayStr;
   const endError = endDate && endDate < endMin ? 'End date can’t be before the start date or in the past.' : null;
 
@@ -176,13 +172,12 @@ export default function NewHabitScreen() {
           <FormSection title="Start date">
             <Field
               error={dateError}
-              hint={trackingStart ? 'Can be backdated to your tracking start.' : undefined}
+              hint={trackingStart ? 'Pick a future date to start later, or backdate to your tracking start.' : 'Pick a future date to start later.'}
             >
               <DateField
                 value={startDate}
                 onChange={setStartDate}
                 min={trackingStart}
-                max={todayStr}
                 title="Start date"
                 invalid={Boolean(dateError)}
               />

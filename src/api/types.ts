@@ -274,6 +274,8 @@ export interface Todo {
   is_all_day?: boolean;
   location?: string | null;
   color?: string | null;
+  /** false = calendar-only event, hidden from the task list. */
+  show_in_tasks?: boolean;
   priority: TodoPriority;
   category: string;
   status: TodoStatus;

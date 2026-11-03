@@ -172,7 +172,7 @@ export function ScheduleView({ today: ref, selected, onSelect, onAdd }: Props) {
           {suffix}
           {!empty ? <Text variant="small" tone="subtle">{`  ${section.data.length}`}</Text> : null}
         </Text>
-        <IconButton label={`Add task on ${longDate(section.date)}`} size={30} onPress={() => onAdd(section.date!)}>
+        <IconButton label={`Add event on ${longDate(section.date)}`} size={30} onPress={() => onAdd(section.date!)}>
           <Plus size={16} color={colors.fgSubtle} />
         </IconButton>
       </View>

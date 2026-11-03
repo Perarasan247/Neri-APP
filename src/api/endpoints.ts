@@ -185,6 +185,8 @@ export interface TodoInput {
   is_all_day?: boolean;
   location?: string;
   color?: string;
+  /** false = calendar-only event, hidden from the task list. */
+  show_in_tasks?: boolean;
   priority?: TodoPriority;
   category?: string;
   subtasks?: Subtask[];

@@ -13,6 +13,7 @@ import { today as todayISO } from '@/lib/format';
 import { pushGoalPrompt } from '@/lib/goalPrompts';
 import { applyGoalPatch, isValidParent, parentCandidatePeriods } from '@/lib/goals';
 import { newClientId } from '@/lib/id';
+import { loadProfile, rememberOnboarded } from '@/lib/onboarded';
 import { sortTodos, todoMatchesQuery } from '@/lib/todoFilters';
 import { sendOrQueue } from '@/offline/sync';
 
@@ -57,13 +58,16 @@ function invalidateTodoData(qc: QueryClient) {
 /* ---------- Profile ---------- */
 
 export const useProfile = (enabled = true) =>
-  useQuery({ queryKey: qk.profile, queryFn: api.getProfile, enabled, staleTime: Infinity });
+  useQuery({ queryKey: qk.profile, queryFn: loadProfile, enabled, staleTime: Infinity });
 
 export function useSubmitOnboarding() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { startDate: string; timezone: string }) => api.submitOnboarding(v.startDate, v.timezone),
-    onSuccess: (profile) => qc.setQueryData(qk.profile, profile),
+    onSuccess: (profile) => {
+      qc.setQueryData(qk.profile, profile);
+      rememberOnboarded(profile);
+    },
   });
 }
 
@@ -428,6 +432,7 @@ function draftTodo(input: api.TodoInput & { client_id: string }, userId: string)
     is_all_day: Boolean(input.is_all_day),
     location: input.location?.trim() || null,
     color: input.color ?? null,
+    show_in_tasks: input.show_in_tasks,
     priority: input.priority ?? 'medium',
     category: input.category || 'Personal',
     status: 'pending',

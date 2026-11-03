@@ -185,6 +185,16 @@ function AppContent({ resolving }: { resolving: boolean }) {
               contentStyle: { backgroundColor: 'transparent' },
             }}
           />
+          {/* Calendar composer: same bottom popup, laid out like the web app's event dialog */}
+          <Stack.Screen
+            name="event/new"
+            options={{
+              presentation: 'transparentModal',
+              animation: reduceMotion ? 'none' : 'fade',
+              headerShown: false,
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
+          />
           <Stack.Screen name="task/[id]" options={{ title: '' }} />
           <Stack.Screen name="habit/new" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="habit/[id]/index" options={{ title: '' }} />

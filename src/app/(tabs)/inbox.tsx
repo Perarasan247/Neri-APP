@@ -21,11 +21,11 @@ import {
 import type { Todo, TodoPriority } from '@/api/types';
 import {
   ActionSheet,
-  AddCta,
   Button,
   Chip,
   EmptyState,
   ErrorState,
+  Fab,
   IconButton,
   LargeTitle,
   ListSkeleton,
@@ -57,7 +57,7 @@ import { space } from '@/theme/tokens';
 const VIEWS: TodoView[] = ['all', 'today', 'upcoming', 'overdue', 'completed'];
 
 const EMPTY_COPY: Record<TodoView, { title: string; description: string }> = {
-  all: { title: 'All clear', description: 'Your inbox is empty. Use “Add a task” to capture one — try “Call mom tomorrow 6pm p1”.' },
+  all: { title: 'All clear', description: 'Your inbox is empty. Tap the + button to capture one — try “Call mom tomorrow 6pm p1”.' },
   today: { title: 'Nothing due today', description: 'Enjoy the breathing room, or plan something for today.' },
   upcoming: { title: 'Nothing upcoming', description: 'Tasks with a future due date will show up here.' },
   overdue: { title: 'No overdue tasks', description: 'You’re all caught up. Nice work.' },
@@ -261,8 +261,6 @@ export default function InboxScreen() {
         />
         {hasFilters ? <Chip label="Clear" icon={<X size={14} color={colors.fgMuted} />} onPress={clearFilters} /> : null}
       </ScrollView>
-
-      <AddCta label="Add a task" onPress={() => router.push('/task/new')} style={styles.cta} />
     </View>
   );
 
@@ -340,6 +338,8 @@ export default function InboxScreen() {
         }
       />
 
+      <Fab label="Add task" onPress={() => router.push('/task/new')} />
+
       <ActionSheet visible={menu.open} onClose={menu.hide} title="View options" options={menuOptions} />
       <ActionSheet visible={categorySheet.open} onClose={categorySheet.hide} title="Filter by category" options={categoryOptions} />
       <ActionSheet visible={prioritySheet.open} onClose={prioritySheet.hide} title="Filter by priority" options={priorityOptions} />
@@ -359,11 +359,10 @@ function Separator() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: space.lg, paddingBottom: space.xxl },
+  content: { paddingHorizontal: space.lg, paddingBottom: 96 },
   search: { marginTop: -space.sm, marginBottom: space.md },
   chipsScroll: { marginHorizontal: -space.lg, marginBottom: space.sm },
   chips: { paddingHorizontal: space.lg, gap: space.sm, alignItems: 'center' },
   chipDivider: { width: StyleSheet.hairlineWidth, height: 20, marginHorizontal: space.xs },
-  cta: { marginBottom: space.sm },
   sectionHeader: { marginTop: space.md },
 });

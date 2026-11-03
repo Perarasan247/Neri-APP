@@ -8,6 +8,7 @@ import { ApiError } from '@/api/client';
 import * as api from '@/api/endpoints';
 import type { Todo, TodayData } from '@/api/types';
 import { loadApiUrlOverride } from '@/lib/config';
+import { loadProfile } from '@/lib/onboarded';
 import { formatTime, setAppTimeZone, today } from '@/lib/format';
 
 import {
@@ -91,7 +92,7 @@ async function fetchSnapshot(prev: WidgetSnapshot | null): Promise<WidgetSnapsho
 
   let timezone = prev && !prev.signedOut ? prev.timezone : null;
   if (!timezone) {
-    const profile = await api.getProfile();
+    const profile = await loadProfile();
     if (!profile) return signedOutSnapshot(prev); // not onboarded yet
     timezone = profile.timezone;
   }

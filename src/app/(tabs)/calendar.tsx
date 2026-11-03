@@ -250,8 +250,8 @@ export default function CalendarScreen() {
     [animX],
   );
 
-  const addOn = useCallback((date: string, time?: string) => {
-    router.push({ pathname: '/task/new', params: time ? { date, time } : { date } });
+  const addOn = useCallback((date: string, time?: string, end?: string) => {
+    router.push({ pathname: '/event/new', params: time ? { date, time, ...(end ? { end } : {}) } : { date } });
   }, []);
   const openTask = useCallback((id: string) => router.push({ pathname: '/task/[id]', params: { id } }), []);
   const openDay = useCallback((date: string) => {
@@ -403,7 +403,7 @@ export default function CalendarScreen() {
       </View>
 
       <View style={styles.flex}>{ready ? body : null}</View>
-      <Fab label="Add task" onPress={() => addOn(selected)} />
+      <Fab label="Add event" onPress={() => addOn(selected)} />
       <ActionSheet visible={viewSheet.open} onClose={viewSheet.hide} title="Calendar view" options={viewOptions} />
       {pickers.sheet}
     </View>

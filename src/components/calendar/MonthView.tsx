@@ -153,7 +153,7 @@ export function MonthView({ year, month, byDate, today, selected, refreshing, on
           {selected === today ? ' · Today' : ''}
           {dayTasks.length ? <Text variant="small" tone="subtle">{`  ${dayTasks.length}`}</Text> : null}
         </Text>
-        <IconButton label={`Add task on ${longDate(selected)}`} size={30} onPress={() => onAdd(selected)}>
+        <IconButton label={`Add event on ${longDate(selected)}`} size={30} onPress={() => onAdd(selected)}>
           <Plus size={16} color={colors.fgSubtle} />
         </IconButton>
       </View>

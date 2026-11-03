@@ -66,6 +66,8 @@ const CHIP_ICONS: Record<ChipType, typeof Calendar> = {
  * ("Pay rent tomorrow 9am p1 #Finance") becomes removable chips; the toolbar
  * sets anything the text doesn't.
  */
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 export default function NewTaskScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -74,14 +76,16 @@ export default function NewTaskScreen() {
   const create = useCreateTodo();
   const all = useTodos({});
   const { height: windowHeight } = useWindowDimensions();
-  const params = useLocalSearchParams<{ date?: string; time?: string; goal?: string }>();
+  const params = useLocalSearchParams<{ date?: string; time?: string; end?: string; goal?: string }>();
   const ref = today();
 
   const [text, setText] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState<string | null>(params.date && ISO_DATE.test(params.date) ? params.date : ref);
   const [time, setTime] = useState<{ start: string; end?: string } | null>(() =>
-    params.time && /^([01]\d|2[0-3]):[0-5]\d$/.test(params.time) ? { start: params.time } : null,
+    params.time && HHMM.test(params.time)
+      ? { start: params.time, ...(params.end && HHMM.test(params.end) && params.end > params.time ? { end: params.end } : {}) }
+      : null,
   );
   const [priority, setPriority] = useState<TodoPriority>(DEFAULT_PRIORITY);
   const [category, setCategory] = useState(DEFAULT_CATEGORY);

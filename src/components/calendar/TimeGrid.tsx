@@ -58,7 +58,7 @@ interface Props {
   selected: string;
   onSelectDay: (date: string) => void;
   /** Long-press on an empty slot. */
-  onCreate: (date: string, time: string) => void;
+  onCreate: (date: string, time: string, end?: string) => void;
   onOpenTask: (id: string) => void;
   /** "+N" in the all-day row. */
   onOpenDay: (date: string) => void;
@@ -157,7 +157,7 @@ const DayColumn = memo(function DayColumn({
   isToday: boolean;
   left: number;
   width: number;
-  onCreate: (date: string, time: string) => void;
+  onCreate: (date: string, time: string, end?: string) => void;
   onOpenTask: (id: string) => void;
 }) {
   const { colors, scheme } = useTheme();
@@ -173,7 +173,14 @@ const DayColumn = memo(function DayColumn({
     >
       <Pressable
         style={StyleSheet.absoluteFill}
-        accessibilityLabel={`Add task on ${date}. Long press`}
+        accessibilityLabel={`Add event on ${date}. Tap an empty slot`}
+        // A tap on empty space makes a one-hour block, like the web calendar (events sit above and take their own taps)
+        onPress={(e) => {
+          haptic.light();
+          const hh = Math.min(23, Math.max(0, Math.floor(e.nativeEvent.locationY / HOUR_H)));
+          const pad = (n: number) => String(n).padStart(2, '0');
+          onCreate(date, `${pad(hh)}:00`, hh === 23 ? '23:59' : `${pad(hh + 1)}:00`);
+        }}
         onLongPress={(e) => {
           haptic.light();
           const mins = Math.floor((e.nativeEvent.locationY / HOUR_H) * 2) * 30;
