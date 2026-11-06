@@ -1,4 +1,4 @@
-import { addDays, diffDays, formatTime, friendlyDate, parseISODate, pluralize, startOfWeek, streakText, toISODate } from '@/lib/format';
+import { nowInZone, addDays, diffDays, formatTime, friendlyDate, parseISODate, pluralize, startOfWeek, streakText, toISODate } from '@/lib/format';
 
 describe('date helpers', () => {
   it('round-trips a date without shifting it by timezone', () => {
@@ -45,5 +45,14 @@ describe('text helpers', () => {
     expect(pluralize(3, 'habit')).toBe('3 habits');
     expect(streakText(1)).toBe('1 day');
     expect(streakText(2, 'week')).toBe('2 weeks');
+  });
+});
+
+describe('nowInZone', () => {
+  it('reads the clock in the given zone, not the device’s', () => {
+    const at = new Date('2026-11-01T20:00:00Z');
+    expect(nowInZone('Asia/Kolkata', at)).toEqual({ hour: 1, minutes: 90 }); // 01:30 the next morning
+    expect(nowInZone('America/New_York', at)).toEqual({ hour: 15, minutes: 15 * 60 }); // 15:00 (EST after DST ends)
+    expect(nowInZone('UTC', new Date('2026-11-01T00:05:00Z'))).toEqual({ hour: 0, minutes: 5 });
   });
 });

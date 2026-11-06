@@ -12,6 +12,7 @@
  * dark, into PNGs), so we never repeat a draw whose inputs haven't changed, and
  * a burst of taps shares one sync instead of one each.
  */
+import { ToastAndroid } from 'react-native';
 import {
   getWidgetInfo,
   requestWidgetUpdateById,
@@ -19,7 +20,7 @@ import {
   type WidgetTaskHandlerProps,
 } from 'react-native-android-widget';
 
-import { today } from '@/lib/format';
+import { addDays, today } from '@/lib/format';
 import { newClientId } from '@/lib/id';
 
 import { ACTIONS, renderNeriWidget, WIDGET_NAME } from './NeriWidget';
@@ -35,6 +36,13 @@ import { enqueue, loadView, syncWidgetData } from './sync';
 
 /** Today in the user's timezone (loadView() sets it from the snapshot). */
 const now = (s: WidgetSnapshot | null) => (s ? today(s.timezone) : today());
+
+/** A short message over the home screen (the quick-add popup has already closed by now). */
+const notify = (message: string) => {
+  try {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+  } catch {}
+};
 
 /** How long to wait after the last tap before talking to the server. */
 const SYNC_DELAY_MS = 700;
@@ -121,12 +129,27 @@ function syncSoon(): Promise<void> {
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** A task or habit typed into the quick-add popup (QuickAddActivity). */
-async function quickAdd(data: Record<string, unknown>) {
+/** The snapshot is from before midnight: its habit rows describe yesterday. */
+const isStale = (s: WidgetSnapshot) => s.date !== now(s);
+
+/**
+ * The widget's data, refreshed from the server first when it is from a previous day (the widget isn't
+ * redrawn at midnight), so a tap never lands on yesterday's date. Offline it stays stale and the caller decides.
+ */
+async function currentView(): Promise<WidgetSnapshot | null> {
   const view = await loadView();
-  if (!view || view.signedOut) return false;
+  if (!view || view.signedOut || !isStale(view)) return view;
+  await syncAndRedraw();
+  return loadView();
+}
+
+/** A task or habit typed into the quick-add popup (QuickAddActivity). Says why when nothing was added. */
+async function quickAdd(data: Record<string, unknown>): Promise<{ ok: true } | { ok: false; message: string }> {
+  const view = await currentView();
+  if (!view || view.signedOut) return { ok: false, message: 'Sign in to Neri to add from the widget' };
   const title = str(data.title).slice(0, 500);
-  if (!title) return false;
+  if (!title) return { ok: false, message: 'Type something to add first' };
+  const day = now(view); // never the (possibly stale) snapshot day or the day the popup was drawn for
 
   if (data.kind === 'habit') {
     const target = Math.round(Number(data.target));
@@ -134,15 +157,24 @@ async function quickAdd(data: Record<string, unknown>) {
       kind: 'habit_create',
       tempId: `tmp-${newClientId()}`,
       name: title.slice(0, 100),
-      date: view.date,
+      date: day,
       target: Number.isFinite(target) && target > 1 ? Math.min(target, 999) : null,
       color: '#635bff',
     });
   } else {
-    const date = str(data.date);
+    const choice = str(data.dateChoice);
+    const date = choice === 'today' ? day : choice === 'tomorrow' ? addDays(day, 1) : choice === 'none' ? '' : str(data.date);
     await enqueue({ kind: 'todo_create', clientId: newClientId(), title, date: ISO_DATE.test(date) ? date : null });
   }
-  return true;
+  return { ok: true };
+}
+
+/** Whether a quick-added task is due today (or earlier), i.e. belongs on the widget's Today page. */
+function wantsToday(data: Record<string, unknown>, view: WidgetSnapshot | null): boolean {
+  const day = now(view);
+  const choice = str(data.dateChoice);
+  if (choice) return choice === 'today';
+  return Boolean(str(data.date)) && str(data.date) <= day;
 }
 
 async function handleTap(props: WidgetTaskHandlerProps) {
@@ -163,13 +195,18 @@ async function handleTap(props: WidgetTaskHandlerProps) {
       return;
     }
     case ACTIONS.habit: {
-      const view = await loadView();
+      const view = await currentView();
       const habit = view?.habits.find((h) => h.id === data.id);
       // Habits needing the full UI open the app from the widget itself (see HabitRow)
       if (!view || !habit || habit.opensApp || (habit.target && habit.done)) return;
+      // Still showing yesterday (offline after midnight): a tap would log the wrong day
+      if (isStale(view)) {
+        await draw(props);
+        return;
+      }
       await enqueue(
         habit.target
-          ? { kind: 'habit_inc', habitId: habit.id, date: view.date, delta: 1 }
+          ? { kind: 'habit_inc', habitId: habit.id, date: view.date, delta: 1, count: habit.count + 1 }
           : { kind: 'habit_set', habitId: habit.id, date: view.date, done: !habit.done },
       );
       await draw(props);
@@ -178,19 +215,29 @@ async function handleTap(props: WidgetTaskHandlerProps) {
     }
     case ACTIONS.task: {
       if (typeof data.id !== 'string') return;
-      await enqueue({ kind: 'todo_toggle', todoId: data.id });
+      // The new status is recorded, not "flip", so a replay can't undo itself
+      const view = await loadView();
+      const task = view?.today.find((t) => t.id === data.id) ?? view?.inbox.find((t) => t.id === data.id);
+      if (!view || view.signedOut || !task) return;
+      await enqueue({ kind: 'todo_toggle', todoId: task.id, done: !task.done });
       await draw(props);
       await syncSoon();
       return;
     }
     case ACTIONS.quickAdd: {
-      if (!(await quickAdd(data))) return;
+      const added = await quickAdd(data);
+      if (!added.ok) {
+        notify(added.message);
+        return;
+      }
+      notify(data.kind === 'habit' ? 'Habit added' : 'Task added'); // only now: it is saved and queued
       // Show the new item on the page it belongs to
       const state = await readViewState(widgetId);
+      const view = await loadView();
       const next: WidgetViewState =
         data.kind === 'habit'
           ? { ...state, page: 'habits' }
-          : { page: 'tasks', taskView: str(data.date) && str(data.date) <= now(await loadView()) ? 'today' : 'inbox' };
+          : { page: 'tasks', taskView: wantsToday(data, view) ? 'today' : 'inbox' };
       await Promise.all([writeViewState(widgetId, next), draw(props, next)]);
       await syncSoon();
       return;

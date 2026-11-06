@@ -4,9 +4,10 @@ import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { setUnauthorizedHandler } from '@/api/client';
-import { isSupabaseConfigured } from '@/lib/config';
+import { isSupabaseConfigured, setApiUrlOverride } from '@/lib/config';
+import { DEMO_OWNER, ownerKey } from '@/lib/owner';
 import { clearPersistedCache, forgetCacheOwner, setSyncOwner } from '@/offline/sync';
-import { readStoredSessionUser, supabase } from '@/lib/supabase';
+import { clearStoredSession, readStoredSessionUser, supabase } from '@/lib/supabase';
 
 type Status = 'loading' | 'signedOut' | 'signedIn';
 
@@ -36,7 +37,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+
+  /**
+   * The account is gone from this device (signed out, or the session was revoked/lapsed): stop saving its
+   * data, drop what was saved, and forget a custom server address. Queued changes are kept on purpose,
+   * keyed to the account, and sent when the same account signs back in.
+   */
+  const endLocalSession = useCallback(async () => {
+    setSyncOwner(null);
+    forgetCacheOwner();
+    await clearPersistedCache();
+    await setApiUrlOverride(null).catch(() => {});
+    qc.clear();
+    setEmail(null);
+    setName(null);
+    setUserId(null);
+    setIsDemo(false);
+    setStatus('signedOut');
+  }, [qc]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -49,26 +69,36 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const { data, error } = await supabase.auth.getSession();
         // Offline with an expired access token Supabase reports "no session" although the account is
         // still saved on the device: open the app on the saved data rather than at the sign-in screen
-        const offlineUser = !data.session && error && isAuthRetryableFetchError(error) ? readStoredSessionUser() : null;
+        const offlineUser = !data.session && error && isAuthRetryableFetchError(error) ? await readStoredSessionUser() : null;
         if (data.session) {
           setEmail(data.session.user.email ?? null);
           setName(nameOf(data.session.user));
+          setUserId(data.session.user.id);
           setStatus('signedIn');
         } else if (offlineUser) {
           setEmail(offlineUser.email);
           setName(offlineUser.name);
+          setUserId(offlineUser.id);
           setStatus('signedIn');
         } else {
-          const hasDemo = (await AsyncStorage.getItem(DEMO_KEY)) || (await AsyncStorage.getItem(LEGACY_DEMO_KEY));
-          setStatus(hasDemo ? 'signedIn' : 'signedOut');
-          setIsDemo(Boolean(hasDemo));
+          // A demo flag left over from a build without Supabase must not sign anyone in now
+          await Promise.all([AsyncStorage.removeItem(DEMO_KEY), AsyncStorage.removeItem(LEGACY_DEMO_KEY)]).catch(() => {});
+          // The session lapsed while the app was closed: nothing of that account's data stays on the device
+          forgetCacheOwner();
+          await clearPersistedCache();
+          setStatus('signedOut');
+          setIsDemo(false);
         }
-        const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
           if (session) {
             setEmail(session.user.email ?? null);
             setName(nameOf(session.user));
+            setUserId(session.user.id);
             setIsDemo(false);
             setStatus('signedIn');
+          } else if (event === 'SIGNED_OUT') {
+            // Revoked, or ended from another place: the screens must follow (no supabase calls in here)
+            void endLocalSession();
           }
         });
         unsub = () => sub.subscription.unsubscribe();
@@ -80,7 +110,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     })().catch(() => setStatus('signedOut'));
 
     return () => unsub?.();
-  }, []);
+  }, [endLocalSession]);
 
   const signIn = useCallback(async (e: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: e, password });
@@ -105,27 +135,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    // Stop saving this account's data first, then wipe what was saved. Queued changes are kept so
-    // they are sent when the same account signs back in.
-    setSyncOwner(null);
-    forgetCacheOwner();
-    await clearPersistedCache();
-    if (isSupabaseConfigured) await supabase.auth.signOut().catch(() => {});
+    await endLocalSession();
+    if (isSupabaseConfigured) {
+      // Ask the server to end the session; offline that fails and, left alone, the saved session would
+      // bring the account straight back on the next launch. So end it on this device regardless.
+      const { error } = await supabase.auth.signOut().catch((e: unknown) => ({ error: e }));
+      if (error) await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      await clearStoredSession();
+    }
     await AsyncStorage.removeItem(DEMO_KEY).catch(() => {});
     await AsyncStorage.removeItem(LEGACY_DEMO_KEY).catch(() => {});
     await AsyncStorage.removeItem(LEGACY_EXPIRY_KEY).catch(() => {});
-    qc.clear();
-    setEmail(null);
-    setName(null);
-    setStatus('signedOut');
-  }, [qc]);
+  }, [endLocalSession]);
 
   // Queued offline changes and the saved data cache belong to whoever is signed in
   useEffect(() => {
-    setSyncOwner(status === 'signedIn' ? (isDemo ? 'demo' : (email ?? 'unknown')) : null);
-  }, [status, isDemo, email]);
+    setSyncOwner(status === 'signedIn' ? (isDemo ? DEMO_OWNER : ownerKey({ id: userId })) : null);
+  }, [status, isDemo, userId]);
 
-  // The server rejected our token (expired or revoked): drop back to the sign-in screen
+  // The server rejected our token and a refresh didn't help (revoked or expired for good): drop back to the sign-in screen
   useEffect(() => {
     if (isDemo || status !== 'signedIn') return;
     setUnauthorizedHandler(() => {

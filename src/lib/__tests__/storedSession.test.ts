@@ -11,10 +11,10 @@ const session = (over: object = {}) =>
 
 describe('parseStoredSessionUser', () => {
   it('reads the email and name of a stored session, even an expired one', () => {
-    expect(parseStoredSessionUser(session())).toEqual({ email: 'a@b.co', name: 'Asha' });
+    expect(parseStoredSessionUser(session())).toEqual({ id: 'u', email: 'a@b.co', name: 'Asha' });
   });
   it('falls back to the metadata "name" and tolerates a missing email', () => {
-    expect(parseStoredSessionUser(session({ user: { id: 'u', user_metadata: { name: 'Ravi' } } }))).toEqual({ email: null, name: 'Ravi' });
+    expect(parseStoredSessionUser(session({ user: { id: 'u', user_metadata: { name: 'Ravi' } } }))).toEqual({ id: 'u', email: null, name: 'Ravi' });
   });
   it('refuses anything that could not sign in again', () => {
     expect(parseStoredSessionUser(null)).toBeNull();

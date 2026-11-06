@@ -2,6 +2,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { checkServerUrl } from './serverUrl';
+
 /** Port the FastAPI backend listens on (matches frontend/vite.config.ts). */
 const DEFAULT_API_PORT = 8000;
 const OVERRIDE_KEY = 'neri.apiUrl';
@@ -27,6 +29,9 @@ function defaultApiUrl(): string {
     : `http://127.0.0.1:${DEFAULT_API_PORT}`;
 }
 
+/** True in development builds (Metro), where plain http to any dev machine is fine. */
+export const IS_DEV = typeof __DEV__ !== 'undefined' && __DEV__;
+
 let apiUrl = defaultApiUrl();
 
 export const config = {
@@ -38,6 +43,13 @@ export const config = {
   supabaseKey: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '',
   /** Request timeout so a dead server never leaves a spinner forever. */
   requestTimeoutMs: 15000,
+  /**
+   * The first request after launch may hit a sleeping free-tier server (a cold start takes up to a
+   * minute), so it gets far longer, and the app says "waking up" rather than "offline".
+   */
+  coldStartTimeoutMs: 90000,
+  /** Shared by file exports and imports, which move a lot of data. */
+  bulkTimeoutMs: 120000,
 };
 
 /** Supabase is optional: without keys the backend serves the demo user. */
@@ -47,7 +59,9 @@ export const isSupabaseConfigured = Boolean(config.supabaseUrl && config.supabas
 export async function loadApiUrlOverride(): Promise<void> {
   try {
     const saved = (await AsyncStorage.getItem(OVERRIDE_KEY)) || (await AsyncStorage.getItem(LEGACY_OVERRIDE_KEY));
-    if (saved) apiUrl = saved;
+    // A saved address that breaks today's rules (e.g. http to a public host) is dropped, never used
+    if (saved && checkServerUrl(saved, IS_DEV).ok) apiUrl = saved.replace(/\/+$/, '');
+    else if (saved) await AsyncStorage.multiRemove([OVERRIDE_KEY, LEGACY_OVERRIDE_KEY]);
   } catch {}
 }
 
@@ -56,6 +70,6 @@ export async function setApiUrlOverride(url: string | null): Promise<void> {
   apiUrl = url ? url.replace(/\/+$/, '') : defaultApiUrl();
   try {
     if (url) await AsyncStorage.setItem(OVERRIDE_KEY, apiUrl);
-    else await AsyncStorage.removeItem(OVERRIDE_KEY);
+    else await AsyncStorage.multiRemove([OVERRIDE_KEY, LEGACY_OVERRIDE_KEY]);
   } catch {}
 }

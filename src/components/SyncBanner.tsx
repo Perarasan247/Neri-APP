@@ -5,7 +5,7 @@ import { AlertCircle, CloudOff } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, useToast } from '@/components/ui';
-import { useOnline } from '@/offline/connectivity';
+import { useOnline, useServerWaking } from '@/offline/connectivity';
 import { useOutboxState } from '@/offline/useOutbox';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -22,6 +22,7 @@ export function SyncBanner() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const online = useOnline();
+  const waking = useServerWaking();
   const { pending, failed, flushing } = useOutboxState();
 
   // One reassuring toast when a backlog finally goes through
@@ -34,12 +35,14 @@ export function SyncBanner() {
     }
   }, [pending, failed, online, flushing, toast]);
 
-  const mode = failed > 0 ? 'failed' : !online ? 'offline' : pending > 0 || flushing ? 'syncing' : null;
+  const mode = failed > 0 ? 'failed' : waking ? 'waking' : !online ? 'offline' : pending > 0 || flushing ? 'syncing' : null;
   if (!mode) return null;
 
   const label =
     mode === 'failed'
       ? `${plural(failed)} couldn’t sync`
+      : mode === 'waking'
+        ? 'Server is waking up… this can take a minute'
       : mode === 'offline'
         ? pending > 0
           ? `Offline · ${plural(pending)} waiting to sync`
@@ -63,7 +66,7 @@ export function SyncBanner() {
         onPress={() => router.push('/settings')}
         style={[styles.pill, { backgroundColor: bg }]}
       >
-        {mode === 'syncing' ? (
+        {mode === 'syncing' || mode === 'waking' ? (
           <ActivityIndicator size="small" color={fg} />
         ) : mode === 'failed' ? (
           <AlertCircle size={15} color={fg} />

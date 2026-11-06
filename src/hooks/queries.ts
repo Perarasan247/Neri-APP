@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from 'react';
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
+import { ApiError } from '@/api/client';
 import * as api from '@/api/endpoints';
 import type { OutboxOp } from '@/offline/outbox';
 import type { Goal, GoalCurrent, GoalDetail, GoalLevel, Habit, MonthlyData, RepeatScope, Subtask, Todo, TodayData } from '@/api/types';
@@ -78,15 +79,30 @@ export const useToday = (date?: string) =>
   useQuery({ queryKey: qk.today(date), queryFn: () => api.getTodayData(date), placeholderData: keepPreviousData });
 
 /**
- * Apply an optimistic change to every cached Today payload for `date`,
- * returning a rollback function.
+ * Apply an optimistic change to every cached Today payload for `date`, returning a rollback function.
+ * With `habitId`, the rollback puts back only that habit's row (then re-totals), so undoing a failed tap
+ * never discards other taps made meanwhile. Without it (whole-day changes) the whole payload is restored.
  */
-function patchToday(qc: QueryClient, date: string, fn: (d: TodayData) => TodayData) {
+function patchToday(qc: QueryClient, date: string, fn: (d: TodayData) => TodayData, habitId?: string) {
   const snapshots = qc.getQueriesData<TodayData>({ queryKey: ['today'] });
   for (const [key, data] of snapshots) {
     if (data && data.date === date) qc.setQueryData(key, fn(data));
   }
-  return () => snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
+  return () => {
+    for (const [key, before] of snapshots) {
+      if (!before || before.date !== date) continue;
+      if (!habitId) {
+        qc.setQueryData(key, before);
+        continue;
+      }
+      const original = before.items.find((i) => i.habit.id === habitId);
+      qc.setQueryData<TodayData>(key, (now) => {
+        if (!now) return now;
+        if (!original) return now;
+        return recount({ ...now, items: now.items.map((i) => (i.habit.id === habitId ? original : i)) });
+      });
+    }
+  };
 }
 
 function recount(d: TodayData): TodayData {
@@ -158,6 +174,7 @@ export function useToggleHabit() {
               : i,
           ),
         }),
+        v.habitId,
       );
       return { rollback };
     },
@@ -191,6 +208,7 @@ export function useIncrementHabit() {
             return i.habit.type === 'avoid_count' ? { ...i, count, status: count > 0 ? 'not_done' : 'done' } : { ...i, count };
           }),
         }),
+        v.habitId,
       );
       return { rollback };
     },
@@ -216,6 +234,7 @@ export function useSetSlips() {
             i.habit.id === v.habitId ? { ...i, count: v.count, status: v.count > 0 ? 'not_done' : 'done' } : i,
           ),
         }),
+        v.habitId,
       );
       return { rollback };
     },
@@ -288,6 +307,7 @@ export function useAddValue() {
               : i,
           ),
         }),
+        v.habitId,
       );
       return { rollback };
     },
@@ -328,16 +348,32 @@ export function useHabit(id?: string) {
 
 export function useCreateHabit() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: api.createHabit, onSuccess: () => invalidateHabitData(qc) });
+  // No automatic retry: a create that reached the server but lost its reply would be made twice
+  return useMutation({ mutationFn: api.createHabit, retry: false, onSuccess: () => invalidateHabitData(qc) });
 }
 
 export function useUpdateHabit() {
   const qc = useQueryClient();
   return useMutation({
+    // Two requests (look, then schedule): if the second fails the first is already saved, so say so
+    // instead of reporting a plain failure for a half-saved habit
     mutationFn: async (v: { id: string; cosmetics?: api.HabitCosmeticsInput; schedule?: Parameters<typeof api.updateHabitSchedule>[1] }) => {
       if (v.cosmetics) await api.updateHabitCosmetics(v.id, v.cosmetics);
-      if (v.schedule) await api.updateHabitSchedule(v.id, v.schedule);
+      if (v.schedule) {
+        try {
+          await api.updateHabitSchedule(v.id, v.schedule);
+        } catch (e) {
+          if (!v.cosmetics) throw e;
+          const reason = e instanceof Error ? e.message : 'Something went wrong.';
+          throw new ApiError(
+            `Your other changes were saved, but the schedule wasn’t updated: ${reason}`,
+            e instanceof ApiError ? e.status : 0,
+            e instanceof ApiError ? e.kind : 'http',
+          );
+        }
+      }
     },
+    retry: false, // a retry would repeat the half that already succeeded
     onSettled: () => invalidateHabitData(qc),
   });
 }
@@ -354,6 +390,7 @@ export function useReopenHabit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: string; date: string }) => api.reopenHabit(v.id, v.date),
+    retry: false, // not idempotent
     onSettled: () => invalidateHabitData(qc),
   });
 }
@@ -656,7 +693,8 @@ function patchGoal(qc: QueryClient, id: string, fn: <T extends Goal>(g: T) => T)
 
 export function useCreateGoal() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: api.createGoal, onSettled: () => invalidateGoalData(qc) });
+  // No automatic retry: the server has no idempotency key for goals, so a resend could duplicate it
+  return useMutation({ mutationFn: api.createGoal, retry: false, onSettled: () => invalidateGoalData(qc) });
 }
 
 export function useUpdateGoal() {
@@ -691,6 +729,7 @@ export function useCarryGoal() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: string; periodStart?: string }) => api.carryGoal(v.id, v.periodStart),
+    retry: false, // carrying creates a new goal: never twice
     onSettled: () => invalidateTodoData(qc),
   });
 }

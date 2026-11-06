@@ -1,7 +1,10 @@
-import { config, isSupabaseConfigured } from '@/lib/config';
-import { isAuthRetryableFetchError } from '@supabase/supabase-js';
+import { config, IS_DEV, isSupabaseConfigured } from '@/lib/config';
+import { isAllowedServerUrl } from '@/lib/serverUrl';
+import { isAuthApiError, isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { setServerReachable } from '@/offline/connectivity';
+import { hasReachedServer, setServerReachable, trackWaking } from '@/offline/connectivity';
+
+import { withAuthRefresh, type RefreshOutcome } from './authRetry';
 
 /** Error carrying the HTTP status so callers can branch on 401 / 404 / network. */
 export class ApiError extends Error {
@@ -104,10 +107,17 @@ function buildUrl(path: string, query?: Query): string {
 async function send(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
-  opts: { query?: Query; body?: unknown; accept?: string },
-): Promise<{ res: Response; text: string }> {
+  opts: { query?: Query; body?: unknown; accept?: string; timeoutMs?: number },
+): Promise<{ res: Response; text: string; status: number }> {
+  // The login token goes to this host: never over plain http outside development / a private network
+  if (!isAllowedServerUrl(config.apiUrl, IS_DEV)) {
+    throw new ApiError('The server address must use https. Change it in Settings.', 0, 'network');
+  }
+  // Before the server has answered once it may be asleep (a cold start takes up to a minute)
+  const coldStart = !hasReachedServer();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? (coldStart ? config.coldStartTimeoutMs : config.requestTimeoutMs));
+  const stopWaking = trackWaking(coldStart);
 
   let res: Response;
   try {
@@ -133,11 +143,45 @@ async function send(
     );
   } finally {
     clearTimeout(timer);
+    stopWaking();
   }
 
   // Any HTTP answer (even an error) proves the server is up
   setServerReachable(true);
-  return { res, text: await res.text() };
+  return { res, text: await res.text(), status: res.status };
+}
+
+let refreshing: Promise<RefreshOutcome> | null = null;
+
+/** Refresh the Supabase session once, however many requests found their token expired at the same time. */
+function refreshSession(): Promise<RefreshOutcome> {
+  if (!isSupabaseConfigured) return Promise.resolve('rejected');
+  return (refreshing ??= (async (): Promise<RefreshOutcome> => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (data.session) return 'refreshed';
+      // Only a definite refusal ends the session; anything we can't tell (offline, timeout) keeps it
+      return error && isAuthApiError(error) ? 'rejected' : 'unreachable';
+    } catch {
+      return 'unreachable';
+    }
+  })().finally(() => {
+    refreshing = null;
+  }));
+}
+
+/** `send`, but an expired token is refreshed and the request repeated once before giving up on the session. */
+async function sendAuthed(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  opts: { query?: Query; body?: unknown; accept?: string; timeoutMs?: number },
+) {
+  const { result, unauthorized } = await withAuthRefresh(
+    () => send(method, path, opts),
+    refreshSession,
+    () => new ApiError('Your session can’t be refreshed right now. Check your connection.', 0, 'network'),
+  );
+  return { ...result, unauthorized };
 }
 
 function parseJson(text: string): any {
@@ -149,8 +193,9 @@ function parseJson(text: string): any {
   }
 }
 
-function failure(res: Response, data: any): ApiError {
-  if (res.status === 401) onUnauthorized?.();
+function failure(res: Response, data: any, unauthorized: boolean): ApiError {
+  // Only after a refresh failed too: one rejected token is not the end of the session
+  if (res.status === 401 && unauthorized) onUnauthorized?.();
   return new ApiError(messageForStatus(res.status, data?.detail), res.status);
 }
 
@@ -161,14 +206,14 @@ function failure(res: Response, data: any): ApiError {
 export async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
-  opts: { query?: Query; body?: unknown } = {},
+  opts: { query?: Query; body?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
   if (method === 'GET' && beforeRead) await beforeRead();
 
-  const { res, text } = await send(method, path, opts);
+  const { res, text, unauthorized } = await sendAuthed(method, path, opts);
   const data = parseJson(text);
 
-  if (!res.ok) throw failure(res, data);
+  if (!res.ok) throw failure(res, data, unauthorized);
 
   // 2xx but not JSON: usually a wrong server address answering with a web page
   if (text && typeof data === 'string') {
@@ -179,16 +224,19 @@ export async function request<T>(
 }
 
 /** GET that returns the body as text (file exports). Not gated: it is a deliberate user action. */
-export async function requestText(path: string, query?: Query): Promise<string> {
-  const { res, text } = await send('GET', path, { query, accept: '*/*' });
-  if (!res.ok) throw failure(res, parseJson(text));
+export async function requestText(path: string, query?: Query, timeoutMs?: number): Promise<string> {
+  const { res, text, unauthorized } = await sendAuthed('GET', path, { query, accept: '*/*', timeoutMs });
+  if (!res.ok) throw failure(res, parseJson(text), unauthorized);
   return text;
 }
 
 /** Cheap "is the server up?" check against the root endpoint (no auth, never throws). */
-export async function pingServer(timeoutMs = 5000): Promise<boolean> {
+export async function pingServer(timeoutMs?: number): Promise<boolean> {
+  if (!isAllowedServerUrl(config.apiUrl, IS_DEV)) return false;
+  const coldStart = !hasReachedServer();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? (coldStart ? config.coldStartTimeoutMs : 5000));
+  const stopWaking = trackWaking(coldStart);
   try {
     const res = await fetch(`${config.apiUrl}/`, { signal: controller.signal, headers: { Accept: 'application/json' } });
     setServerReachable(true);
@@ -198,5 +246,6 @@ export async function pingServer(timeoutMs = 5000): Promise<boolean> {
     return false;
   } finally {
     clearTimeout(timer);
+    stopWaking();
   }
 }

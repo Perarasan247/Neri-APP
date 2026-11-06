@@ -31,6 +31,12 @@ describe('check-env build guard', () => {
     expect(r.stderr).toContain('local address');
   });
 
+  it('fails a cloud build whose API address is plain http', () => {
+    const r = run({ EAS_BUILD: 'true', EAS_BUILD_PROFILE: 'production', ...GOOD, EXPO_PUBLIC_API_URL: 'http://api.example.com' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('must start with https://');
+  });
+
   it('refuses a service-role key in the client bundle', () => {
     const jwt = ['h', Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url'), 's'].join('.');
     const r = run({ EAS_BUILD: 'true', EAS_BUILD_PROFILE: 'production', ...GOOD, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: jwt });

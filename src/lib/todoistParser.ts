@@ -75,6 +75,11 @@ function formatTime12(h: number, m: number): string {
   return `${displayH}:${mStr} ${ampm}`;
 }
 
+/** Whether text matched by the range pattern really reads as clock times (not "pages 10-20"). */
+export function isTimeRange(matched: string): boolean {
+  return /^from\s/i.test(matched) || /am|pm|:/i.test(matched);
+}
+
 export function parseTodoistInput(raw: string): ParsedTodo {
   let text = raw.trim();
   const chips: ParsedTodo['chips'] = [];
@@ -131,7 +136,10 @@ export function parseTodoistInput(raw: string): ParsedTodo {
 
   // 3. Parse Time Range: e.g. "from 3 to 4 PM", "3 to 4pm", "3-4pm", "15:00-16:00", "6 to 7 meeting"
   const rangeRegex = /\b(?:from\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|until|–)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
-  const rMatch = text.match(rangeRegex);
+  let rMatch = text.match(rangeRegex);
+  // A bare "10-20" or "pages 10 to 20" is not a time: a range needs am/pm, a colon, or "from"
+  if (rMatch && !isTimeRange(rMatch[0])) rMatch = null;
+  let rangeParsed = false;
 
   if (rMatch) {
     let startH = parseInt(rMatch[1], 10);
@@ -148,6 +156,9 @@ export function parseTodoistInput(raw: string): ParsedTodo {
         if (endH === 12) {
           // e.g. 11 to 12 PM -> 11 AM
           startAmPm = startH === 12 ? 'pm' : (startH < 12 ? 'am' : 'pm');
+        } else if (startH === 12) {
+          // e.g. 12 to 1 PM -> noon
+          startAmPm = 'pm';
         } else if (startH <= endH) {
           // e.g. 3 to 4 PM -> 3 PM
           startAmPm = 'pm';
@@ -179,7 +190,12 @@ export function parseTodoistInput(raw: string): ParsedTodo {
     if (endAmPm === 'pm' && endH < 12) endH += 12;
     if (endAmPm === 'am' && endH === 12) endH = 0;
 
-    if (startH >= 0 && startH <= 23 && endH >= 0 && endH <= 23) {
+    const valid =
+      startH >= 0 && startH <= 23 && endH >= 0 && endH <= 23 && startM <= 59 && endM <= 59 &&
+      // "11pm to 1am" would end before it starts: events live on one day
+      endH * 60 + endM > startH * 60 + startM;
+    if (valid) {
+      rangeParsed = true;
       startTime = `${startH.toString().padStart(2, '0')}:${startM.toString().padStart(2, '0')}`;
       endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
       dueTime = startTime;
@@ -188,7 +204,8 @@ export function parseTodoistInput(raw: string): ParsedTodo {
       chips.push({ type: 'time', label, value: `${startTime}-${endTime}` });
       text = text.replace(rangeRegex, '').trim();
     }
-  } else {
+  }
+  if (!rangeParsed) {
     // 4. Parse Single Time: e.g. "at 5pm", "at 17:00", "9:30am", "10pm"
     const strictTimeRegex = /\b(?:at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?|(\d{1,2}):(\d{2})\s*(am|pm)?|(\d{1,2})\s*(am|pm))\b/i;
     const tMatch = text.match(strictTimeRegex);
@@ -203,8 +220,8 @@ export function parseTodoistInput(raw: string): ParsedTodo {
       if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
         startTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         // Default end time + 1 hour
-        const endHour = (hours + 1) % 24;
-        endTime = `${endHour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        // (an 11 pm start ends at 23:59: an event can't run past midnight)
+        endTime = hours === 23 ? '23:59' : `${(hours + 1).toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         dueTime = startTime;
         chips.push({ type: 'time', label: `🕒 ${formatTime12(hours, minutes)}`, value: dueTime });
         text = text.replace(strictTimeRegex, '').trim();
@@ -219,7 +236,7 @@ export function parseTodoistInput(raw: string): ParsedTodo {
   // - "next [weekday]", "on [weekday]", "[weekday]"
   const todayRegex = /\b(today)\b/i;
   const tmrRegex = /\b(tomorrow|tmr)\b/i;
-  const inDaysRegex = /\bin\s+(\d+)\s*(days?|weeks?)\b/i;
+  const inDaysRegex = /\bin\s+(\d{1,3})\s*(days?|weeks?)\b/i;
   const weekdayRegex = /\b(?:next\s+|on\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
 
   if (todayRegex.test(text)) {
@@ -235,7 +252,8 @@ export function parseTodoistInput(raw: string): ParsedTodo {
     if (inDaysMatch) {
       const amount = parseInt(inDaysMatch[1], 10);
       const unit = inDaysMatch[2].toLowerCase();
-      dueDate = addDays(base, unit.startsWith('week') ? amount * 7 : amount);
+      // Capped (about ten years) so the date stays valid and the server accepts it
+      dueDate = addDays(base, Math.min(3650, unit.startsWith('week') ? amount * 7 : amount));
       chips.push({ type: 'date', label: `📅 In ${amount} ${unit}`, value: dueDate });
       text = text.replace(inDaysRegex, '').trim();
     } else {

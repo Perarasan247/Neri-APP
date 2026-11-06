@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 import { DatePickerSheet, TimePickerSheet } from '@/components/ui';
 import { formatHHMM } from '@/lib/calendarMath';
-import { today } from '@/lib/format';
+import { nowInZone, today } from '@/lib/format';
 
 interface PickRequest {
   id: number;
@@ -25,7 +25,7 @@ interface PickOptions {
 
 /** Opening hour offered when nothing is set: the next full hour, capped at 23:00. */
 function defaultTime(): string {
-  return formatHHMM(Math.min(new Date().getHours() + 1, 23), 0);
+  return formatHHMM(Math.min(nowInZone().hour + 1, 23), 0);
 }
 
 let nextId = 1;

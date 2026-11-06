@@ -12,6 +12,7 @@ import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { adoptWidgetQueue } from './adopt';
 import { writeWidgetAccent } from './store';
 import { markSignedOut, syncWidgetData } from './sync';
 import { updateAllWidgets } from './taskHandler';
@@ -46,6 +47,8 @@ export function useWidgetSync(status: 'loading' | 'signedIn' | 'signedOut') {
 
     const run = async () => {
       try {
+        // Widget taps made while changes were already waiting in the app join that queue, in time order
+        await adoptWidgetQueue();
         const sentFromWidget = await syncWidgetData();
         // The widget changed data behind React Query's back: refresh what's on screen
         if (sentFromWidget > 0 && !disposed) {

@@ -29,7 +29,7 @@ import { usePickers } from '@/components/tasks/DatePickerSheet';
 import { RepeatSheet } from '@/components/tasks/RepeatSheet';
 import { collectCategories } from '@/components/tasks/taskOptions';
 import { useCreateTodo, useTodos } from '@/hooks/queries';
-import { formatTime, longDate, today } from '@/lib/format';
+import { formatTime, longDate, nowInZone, today } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { describeRepeat, nextMatchingDate } from '@/lib/repeat';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -56,7 +56,7 @@ const duration = (mins: number) => {
   return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`;
 };
 /** The next full hour, capped so the default hour still fits in the day. */
-const nextHour = () => fromMin(Math.min(22, new Date().getHours() + 1) * 60);
+const nextHour = () => fromMin(Math.min(22, nowInZone().hour + 1) * 60);
 
 /** A calendar event composer: title on a colour band, date and time range, then detail rows (as on web). */
 export default function NewEventScreen() {

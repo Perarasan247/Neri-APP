@@ -4,6 +4,7 @@
  * - a parsed token can be stripped when the user picks a value from the toolbar,
  */
 import type { Repeat, TodoPriority } from '@/api/types';
+import { today } from '@/lib/format';
 import { findRepeatPhrase, parseTodoistInput, type ParsedTodo } from '@/lib/todoistParser';
 
 export type ChipType = ParsedTodo['chips'][number]['type'];
@@ -20,7 +21,27 @@ export interface QuickAddResult {
   endTime?: string;
 }
 
-const hasChip = (text: string, type: ChipType) => parseTodoistInput(text).chips.some((c) => c.type === type);
+// findTokenSpan re-parses the text many times per keystroke; the parser is pure (it only depends on the
+// text and today's date), so remember recent results. Keyed by day so a result never outlives midnight.
+const CACHE_MAX = 200;
+let parseCache = new Map<string, ParsedTodo>();
+let parseCacheDay = '';
+
+function parseCached(text: string): ParsedTodo {
+  const day = today();
+  if (day !== parseCacheDay) {
+    parseCache = new Map();
+    parseCacheDay = day;
+  }
+  const hit = parseCache.get(text);
+  if (hit) return hit;
+  const result = parseTodoistInput(text);
+  if (parseCache.size >= CACHE_MAX) parseCache.delete(parseCache.keys().next().value as string);
+  parseCache.set(text, result);
+  return result;
+}
+
+const hasChip = (text: string, type: ChipType) => parseCached(text).chips.some((c) => c.type === type);
 
 /** Word span [start, end) whose removal makes the parser stop finding `type`. */
 function findTokenSpan(words: string[], type: ChipType): [number, number] | null {
@@ -82,7 +103,7 @@ export function parseQuickAdd(raw: string, ignored: ReadonlySet<ChipType>): Quic
     input = words.join(' ');
   }
 
-  const p = parseTodoistInput(input);
+  const p = parseCached(input);
   let title = p.cleanTitle;
   masked.forEach((text, i) => {
     title = title.replace(String.fromCharCode(0xe000 + i), text);

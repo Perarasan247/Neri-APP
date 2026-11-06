@@ -28,7 +28,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 
 /**
  * Quick-add popup for the home-screen widget's "+" button. It opens as a bottom
@@ -265,6 +264,8 @@ class QuickAddActivity : Activity() {
                 putString("target", if (counted) target.toString() else "1")
             } else {
                 putString("date", if (date == "today") today else if (date == "tomorrow") tomorrow else "")
+                // The choice itself, so the app works out "today" at the moment it handles this (not when the popup was drawn)
+                putString("dateChoice", date)
             }
         }
         // Same broadcast a widget tap sends; the provider starts the headless JS task with it.
@@ -275,8 +276,9 @@ class QuickAddActivity : Activity() {
             putExtra("clickAction", "QUICK_ADD")
             putExtra("clickActionData", data)
         }
+        // No "added" toast here: the JS side shows it once it has really saved the item, or says why it couldn't
+        // (signed out, nothing typed). Confirming before that would claim success for something that was dropped.
         sendBroadcast(broadcast)
-        Toast.makeText(applicationContext, if (kind == "habit") "Habit added" else "Task added", Toast.LENGTH_SHORT).show()
         dismiss()
     }
 

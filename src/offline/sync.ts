@@ -18,7 +18,7 @@ import {
   setDeviceConnected,
   subscribeOnline,
 } from './connectivity';
-import { createOutbox, type FlushResult, type OutboxOp, type Verdict } from './outbox';
+import { classifyFailure, createOutbox, type FlushResult, type OutboxOp, type Verdict } from './outbox';
 import { CACHE_VERSION, parseCache, selectQueries, type PersistedCache } from './persist';
 
 export const outbox = createOutbox(KV);
@@ -43,8 +43,10 @@ export function forgetCacheOwner() {
 /** Called by the session: the signed-in account (null when signed out). */
 export function setSyncOwner(next: string | null) {
   owner = next;
+  // The sync screen and banner count this account's changes only. Another account's queued changes
+  // are kept untouched on the device until that account signs back in (they are never sent or shown here).
+  outbox.setViewer(next);
   if (next) {
-    void outbox.purgeOthers(next);
     // A cache restored from a different account must never be shown. Reset (not clear): this runs
     // while the new account's first queries are already in flight, and clearing would orphan them.
     if (cacheOwner !== null && cacheOwner !== next) {
@@ -78,14 +80,7 @@ function executeOp(op: OutboxOp): Promise<unknown> {
 
 /** Decide what a failed replay means (see `Verdict`). */
 export function classifyError(error: unknown, op: OutboxOp): Verdict {
-  if (!(error instanceof ApiError)) return 'fail';
-  if (error.isNetwork) return 'network';
-  // The session expired: keep everything, it is sent after signing back in
-  if (error.status === 401) return 'network';
-  if (error.status === 408 || error.status === 429 || error.status >= 500) return 'retry';
-  // The task is already gone: nothing left to delete or edit
-  if (error.status === 404 && (op.type === 'deleteTodo' || op.type === 'updateTodo' || (op.type === 'restDay' && !op.on))) return 'done';
-  return 'fail';
+  return classifyFailure(error instanceof ApiError ? { status: error.status, isNetwork: error.isNetwork } : null, op);
 }
 
 /** Send what is queued for the signed-in account. Refreshes screens once something was sent. */
@@ -106,7 +101,13 @@ export async function flushNow(qc: QueryClient = queryClient): Promise<FlushResu
  */
 export async function sendOrQueue<T>(op: OutboxOp | null, send: () => Promise<T>, fallback: T): Promise<T> {
   const o = owner;
-  if (!o || !op) return send();
+  if (!o) return send();
+  if (!op) {
+    // Can't be queued (series edits, creating a habit…): but it must not overtake changes still waiting,
+    // e.g. editing a task that was created offline. Send what's queued first (bounded wait).
+    if (getOnline() && outbox.hasPending(o)) await Promise.race([outbox.flush(o, executeOp, classifyError), sleep(READ_WAIT_MS)]);
+    return send();
+  }
 
   if (!getOnline() || outbox.hasPending(o)) {
     await outbox.add(o, op);
@@ -125,10 +126,15 @@ export async function sendOrQueue<T>(op: OutboxOp | null, send: () => Promise<T>
 /* ---------- Cache on the device ---------- */
 
 /** Load the saved cache into React Query. Call once at startup, before any screen reads. */
-export async function restoreQueryCache(qc: QueryClient = queryClient): Promise<void> {
+export async function restoreQueryCache(qc: QueryClient = queryClient, expectedOwner: string | null = null): Promise<void> {
   try {
     const cache = parseCache(await KV.getItem(CACHE_KEY), Date.now());
     if (cache) {
+      // Only the saved account's own data may be shown: a cache of someone else (or of nobody known) is dropped
+      if (!expectedOwner || cache.owner !== expectedOwner) {
+        await clearPersistedCache();
+        return;
+      }
       hydrate(qc, cache.state);
       cacheOwner = cache.owner;
     }

@@ -36,6 +36,14 @@ export function today(tz = appTimeZone): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 }
 
+/** Hour (0-23) and minutes since midnight right now in the user's timezone (not the device's). */
+export function nowInZone(tz = appTimeZone, at: Date = new Date()): { hour: number; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const hour = get('hour') % 24;
+  return { hour, minutes: hour * 60 + get('minute') };
+}
+
 export function addDays(dateStr: string, delta: number): string {
   const d = parseISODate(dateStr);
   d.setDate(d.getDate() + delta);

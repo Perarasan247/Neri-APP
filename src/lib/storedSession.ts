@@ -5,6 +5,8 @@
  * for a password it can't verify.
  */
 export interface StoredSessionUser {
+  /** The account's id: what queued changes and cached data are keyed by. */
+  id: string | null;
   email: string | null;
   name: string | null;
 }
@@ -18,7 +20,7 @@ export function parseStoredSessionUser(raw: string | null | undefined): StoredSe
     const user = s.user;
     if (!user || typeof user !== 'object') return null;
     const name = String(user.user_metadata?.full_name || user.user_metadata?.name || '').trim() || null;
-    return { email: typeof user.email === 'string' ? user.email : null, name };
+    return { id: typeof user.id === 'string' && user.id ? user.id : null, email: typeof user.email === 'string' ? user.email : null, name };
   } catch {
     return null;
   }

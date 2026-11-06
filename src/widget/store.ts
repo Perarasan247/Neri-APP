@@ -45,6 +45,8 @@ export interface WidgetTask {
 }
 
 export interface WidgetSnapshot {
+  /** Whose data this is (see lib/owner.ts); taps are queued for, and only shown on, the same owner. */
+  owner?: string | null;
   /** The day the habit data belongs to, in the user's timezone. */
   date: string;
   timezone: string;
@@ -62,14 +64,17 @@ export interface WidgetSnapshot {
 /** A tap made on the widget, before it is queued. */
 export type WidgetActionInput =
   | { kind: 'habit_set'; habitId: string; date: string; done: boolean }
-  | { kind: 'habit_inc'; habitId: string; date: string; delta: number }
-  | { kind: 'todo_toggle'; todoId: string }
+  /** `count` is the day's new total: replays send that absolute value, so a resend never adds twice. */
+  | { kind: 'habit_inc'; habitId: string; date: string; delta: number; count?: number }
+  /** `done` is the status the tap chose (absolute); missing only in taps queued by older versions (a flip). */
+  | { kind: 'todo_toggle'; todoId: string; done?: boolean }
   /** From the widget's quick-add popup. `clientId` becomes the server's row id. */
   | { kind: 'todo_create'; clientId: string; title: string; date: string | null }
   /** `tempId` is swapped for the server's id once the habit is created. */
-  | { kind: 'habit_create'; tempId: string; name: string; date: string; target: number | null; color: string };
+  | { kind: 'habit_create'; tempId: string; name: string; date: string; target: number | null; color: string; /** A create was already sent once (outcome unknown): look for the habit before creating it again. */ attempted?: boolean };
 
-export type WidgetAction = { id: string; at: number } & WidgetActionInput;
+/** `owner` is who made the tap; actions of another account are kept but never sent or shown. */
+export type WidgetAction = { id: string; at: number; owner?: string | null } & WidgetActionInput;
 
 export type WidgetPage = 'habits' | 'tasks';
 export type TaskView = 'today' | 'inbox';
@@ -161,14 +166,15 @@ export function applyAction(s: WidgetSnapshot, a: WidgetAction): WidgetSnapshot 
         ...s,
         habits: s.habits.map((h) => {
           if (h.id !== a.habitId) return h;
-          const count = Math.max(0, h.count + a.delta);
+          const count = Math.max(0, a.count ?? h.count + a.delta);
           const done = h.target ? count >= h.target : h.done;
           const streak = done === h.done ? h.streak : Math.max(0, h.streak + (done ? 1 : -1));
           return { ...h, count, done, streak };
         }),
       };
     case 'todo_toggle': {
-      const flip = (list: WidgetTask[]) => list.map((t) => (t.id === a.todoId ? { ...t, done: !t.done } : t));
+      const flip = (list: WidgetTask[]) =>
+        list.map((t) => (t.id === a.todoId ? { ...t, done: a.done ?? !t.done } : t));
       return { ...s, today: flip(s.today), inbox: flip(s.inbox) };
     }
     case 'todo_create': {
@@ -208,4 +214,9 @@ export function renameHabit(q: WidgetAction[], from: string, to: string): Widget
   });
 }
 
-export const applyQueue = (s: WidgetSnapshot, q: WidgetAction[]) => q.reduce(applyAction, s);
+/** Whether a queued tap belongs to `owner` (taps queued before owners were recorded belong to whoever is signed in). */
+export const isOwnedBy = (a: WidgetAction, owner: string | null | undefined) => a.owner === undefined || a.owner === owner;
+
+/** The snapshot with the taps of its own account that the server hasn't confirmed yet. */
+export const applyQueue = (s: WidgetSnapshot, q: WidgetAction[]) =>
+  q.filter((a) => isOwnedBy(a, s.owner)).reduce(applyAction, s);

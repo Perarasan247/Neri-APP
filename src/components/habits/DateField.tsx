@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Platform, Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import { CalendarDays, ChevronRight } from 'lucide-react-native';
 
-import { DatePickerSheet, Text, TextField } from '@/components/ui';
+import { DatePickerSheet, Text } from '@/components/ui';
 import { friendlyDate, longDate } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -23,29 +23,10 @@ interface DateFieldProps {
 
 const clamp = (d: string, min?: string, max?: string) => (min && d < min ? min : max && d > max ? max : d);
 
-/**
- * Tappable date row that opens the app-themed calendar sheet; web falls back
- * to a plain YYYY-MM-DD input.
- */
+/** Tappable date row that opens the app-themed calendar sheet. */
 export function DateField({ value, onChange, min, max, title = 'Pick a date', accessibilityLabel, invalid }: DateFieldProps) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
-
-  if (Platform.OS === 'web') {
-    return (
-      <TextField
-        value={draft}
-        onChangeText={(t) => {
-          setDraft(t);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(t)) onChange(clamp(t, min, max));
-        }}
-        placeholder="YYYY-MM-DD"
-        accessibilityLabel={accessibilityLabel}
-        invalid={invalid}
-      />
-    );
-  }
 
   const openPicker = () => {
     haptic.tap();

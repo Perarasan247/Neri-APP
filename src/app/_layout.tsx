@@ -14,9 +14,11 @@ import { Button, DialogProvider, ErrorState, Text, ToastProvider, useDisclosure 
 import { useProfile } from '@/hooks/queries';
 import { SessionProvider, useSession } from '@/hooks/session';
 import { config, loadApiUrlOverride } from '@/lib/config';
+import { cleanupExportFiles } from '@/lib/exportFiles';
 import { outbox, restoreQueryCache, startSync } from '@/offline/sync';
 import { setAppTimeZone } from '@/lib/format';
 import { queryClient } from '@/lib/queryClient';
+import { readStoredOwner } from '@/lib/storedOwner';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 import { useWidgetAccent, useWidgetSync } from '@/widget/useWidgetSync';
 
@@ -44,8 +46,9 @@ export default function RootLayout() {
   const [configReady, setConfigReady] = useState(false);
 
   useEffect(() => {
+    cleanupExportFiles(); // exports left in the cache by a previous run hold personal data
     // Saved settings, queued offline changes and the saved data cache are all read before the first screen
-    Promise.all([loadApiUrlOverride(), outbox.load(), restoreQueryCache()]).finally(() => setConfigReady(true));
+    Promise.all([loadApiUrlOverride(), outbox.load(), readStoredOwner().then((o) => restoreQueryCache(queryClient, o))]).finally(() => setConfigReady(true));
   }, []);
 
   if (!configReady) return null;

@@ -4,6 +4,7 @@
  * src/hooks/queries.ts so caching and invalidation stay consistent.
  */
 import { ApiError, request, requestText } from './client';
+import { config } from '@/lib/config';
 import type {
   ChecklistItem,
   DashboardInsights,
@@ -280,7 +281,7 @@ export type ExportKind = 'json' | 'logs' | 'tasks';
 
 /** Full backup (JSON) or a CSV of habit logs / tasks, as text ready to be saved to a file. */
 export const exportData = (kind: ExportKind) =>
-  requestText('/export', kind === 'json' ? { format: 'json' } : { format: 'csv', dataset: kind });
+  requestText('/export', kind === 'json' ? { format: 'json' } : { format: 'csv', dataset: kind }, config.bulkTimeoutMs);
 
 export type ImportFormat = 'auto' | 'neri_json' | 'long_csv' | 'wide_csv';
 
@@ -305,4 +306,5 @@ export interface ImportReport {
 export const importData = (content: string, opts: { filename?: string; format?: ImportFormat; dryRun?: boolean } = {}) =>
   request<ImportReport>('POST', '/import', {
     body: { content, filename: opts.filename, format: opts.format ?? 'auto', dry_run: opts.dryRun ?? false },
+    timeoutMs: config.bulkTimeoutMs,
   });

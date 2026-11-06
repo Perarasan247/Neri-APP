@@ -8,6 +8,7 @@ import { FileJson, FileSpreadsheet, ListChecks, Upload } from 'lucide-react-nati
 import * as api from '@/api/endpoints';
 import { NavGroup, NavRow } from '@/components/account/NavRow';
 import { Text, useDialog, useToast } from '@/components/ui';
+import { cleanupExportFiles, deleteLater } from '@/lib/exportFiles';
 import { isEmptyImport, summarizeImport, summarizeWarnings } from '@/lib/importReport';
 import { haptic } from '@/lib/haptics';
 import { today } from '@/lib/format';
@@ -17,6 +18,7 @@ import { space } from '@/theme/tokens';
 const ICON = 17;
 /** The server refuses larger imports (10 MB of text). */
 const MAX_IMPORT_CHARS = 10_000_000;
+const MAX_IMPORT_BYTES = 10_000_000;
 
 const FILES: Record<api.ExportKind, { name: string; mime: string; uti: string; label: string }> = {
   json: { name: 'neri-backup', mime: 'application/json', uti: 'public.json', label: 'Neri backup' },
@@ -54,17 +56,14 @@ export function DataSettings() {
       const text = await api.exportData(kind);
       const f = FILES[kind];
       const ext = kind === 'json' ? 'json' : 'csv';
+      cleanupExportFiles(); // earlier exports that were not cleaned up yet
       const file = new File(Paths.cache, `${f.name}-${today()}.${ext}`);
       file.create({ overwrite: true });
       await file.write(text);
-      try {
-        await Sharing.shareAsync(file.uri, { mimeType: f.mime, UTI: f.uti, dialogTitle: `Export ${f.label.toLowerCase()}` });
-      } finally {
-        // The file holds personal data: don't leave a copy in the cache
-        try {
-          file.delete();
-        } catch {}
-      }
+      // The file holds personal data and must not stay in the cache. It is not deleted as soon as the share
+      // sheet resolves (the receiving app may still be reading it): later, and on the next launch.
+      deleteLater(file);
+      await Sharing.shareAsync(file.uri, { mimeType: f.mime, UTI: f.uti, dialogTitle: `Export ${f.label.toLowerCase()}` });
     });
 
   const doImport = () =>
@@ -73,9 +72,12 @@ export function DataSettings() {
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
 
+      // Check the size before reading anything: a huge file would be loaded into memory only to be refused
       const file = new File(asset.uri);
       let text: string;
       try {
+        const bytes = asset.size ?? file.size ?? 0;
+        if (bytes > MAX_IMPORT_BYTES) throw new Error('That file is too large to import (10 MB max).');
         text = await file.text();
       } finally {
         try {

@@ -22,6 +22,7 @@ import {
 import type { TodayItem } from '@/api/types';
 import { TodayGoalsStrip } from '@/components/goals/TodayGoalsStrip';
 import { TaskRow } from '@/components/tasks/TaskRow';
+import { useReschedule } from '@/components/tasks/taskOptions';
 import { useDayPicker } from '@/components/today/DayPicker';
 import { HabitRow } from '@/components/today/HabitRow';
 import { NoteSheet } from '@/components/today/NoteSheet';
@@ -57,7 +58,6 @@ import {
   useToday,
   useTodos,
   useToggleHabit,
-  useUpdateTodo,
   useUpsertLog,
 } from '@/hooks/queries';
 import { haptic } from '@/lib/haptics';
@@ -91,7 +91,7 @@ export default function TodayScreen() {
   const addValue = useAddValue();
   const restDay = useRestDay();
   const deleteHabit = useDeleteHabit();
-  const updateTodo = useUpdateTodo();
+  const rescheduleTasks = useReschedule();
 
   const addMenu = useDisclosure();
   const [refreshing, setRefreshing] = useState(false);
@@ -308,9 +308,8 @@ export default function TodayScreen() {
         {
           text: 'Reschedule',
           onPress: () => {
-            haptic.success();
-            for (const t of openOverdue) updateTodo.mutate({ id: t.id, patch: { due_date: viewDate } }, { onError });
-            toast(`${pluralize(openOverdue.length, 'task')} rescheduled`);
+            // The same batch helper as the other lists: one message, after the updates have actually finished
+            void rescheduleTasks(openOverdue, viewDate);
           },
         },
       ],

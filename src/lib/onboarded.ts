@@ -12,37 +12,58 @@ import { ApiError } from '@/api/client';
 import * as api from '@/api/endpoints';
 import type { Profile } from '@/api/types';
 import { isSupabaseConfigured } from '@/lib/config';
+import { DEMO_OWNER, ownerKey } from '@/lib/owner';
 import { readStoredSessionUser, supabase } from '@/lib/supabase';
 
 import { parseChoice, type OnboardingChoice } from './onboardedChoice';
 
 const KEY = (user: string) => `neri.onboarded.v1.${user}`;
 
-/** Who is signed in, as a storage key: the account's email, or "demo" without Supabase. Null if unknown. */
-async function accountKey(): Promise<string | null> {
-  if (!isSupabaseConfigured) return 'demo';
+/** Keys of the same answers before accounts were told apart by id (the account's email). */
+const LEGACY_KEY = (email: string) => `neri.onboarded.v1.${email}`;
+
+/**
+ * Who is signed in, as storage keys: the account's id (never a shared fallback), plus the email the answers
+ * used to be saved under. Null if unknown. Without Supabase there is only the demo user.
+ */
+async function accountKeys(): Promise<{ id: string; legacyEmail: string | null } | null> {
+  if (!isSupabaseConfigured) return { id: DEMO_OWNER, legacyEmail: null };
   try {
     const { data } = await supabase.auth.getSession();
-    const email = data.session?.user.email ?? readStoredSessionUser()?.email ?? null;
-    return email ? email.trim().toLowerCase() : null;
+    const user = data.session?.user ?? (await readStoredSessionUser());
+    const id = user && 'id' in user ? user.id : null;
+    const email = user?.email ?? null;
+    const key = ownerKey({ id });
+    return key ? { id: key, legacyEmail: email ? email.trim().toLowerCase() : null } : null;
   } catch {
-    return readStoredSessionUser()?.email?.trim().toLowerCase() ?? null;
+    const user = await readStoredSessionUser();
+    const key = ownerKey(user);
+    return key ? { id: key, legacyEmail: user?.email?.trim().toLowerCase() ?? null } : null;
   }
 }
 
 export async function rememberOnboarded(profile: Pick<Profile, 'timezone' | 'tracking_start_date'>): Promise<void> {
   try {
-    const key = await accountKey();
-    if (!key) return;
+    const who = await accountKeys();
+    if (!who) return;
     const choice: OnboardingChoice = { timezone: profile.timezone, trackingStartDate: profile.tracking_start_date };
-    await AsyncStorage.setItem(KEY(key), JSON.stringify(choice));
+    await AsyncStorage.setItem(KEY(who.id), JSON.stringify(choice));
   } catch {}
 }
 
 async function recall(): Promise<OnboardingChoice | null> {
   try {
-    const key = await accountKey();
-    return key ? parseChoice(await AsyncStorage.getItem(KEY(key))) : null;
+    const who = await accountKeys();
+    if (!who) return null;
+    const byId = parseChoice(await AsyncStorage.getItem(KEY(who.id)));
+    if (byId || !who.legacyEmail) return byId;
+    // Saved before accounts were keyed by id: carry it over once
+    const byEmail = parseChoice(await AsyncStorage.getItem(LEGACY_KEY(who.legacyEmail)));
+    if (byEmail) {
+      await AsyncStorage.setItem(KEY(who.id), JSON.stringify(byEmail));
+      await AsyncStorage.removeItem(LEGACY_KEY(who.legacyEmail));
+    }
+    return byEmail;
   } catch {
     return null;
   }

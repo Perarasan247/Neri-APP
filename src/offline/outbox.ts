@@ -8,7 +8,11 @@
  *   operations never overtake an earlier one
  * - at-least-once, made safe by idempotent operations: logs are absolute upserts, creates carry a
  *   `client_id`, deletes treat "already gone" as done
- * - nothing is silently dropped: a rejected operation is kept as `failed` for the user to retry or discard
+ * - nothing is silently dropped: a rejected operation is kept as `failed` for the user to retry or discard,
+ *   and so are the queued edits that depended on it
+ * - outages are ridden out by time, not by count: a server error is retried with a growing delay
+ *   (`backoffDelay`) so a minute or two of downtime never fails an item for good
+ * - changes belong to an account: another account's entries are never sent, shown or deleted
  */
 import type { TodoInput, TodoPatch, UpsertLogInput } from '@/api/endpoints';
 import { newClientId } from '@/lib/id';
@@ -37,6 +41,8 @@ export interface OutboxEntry {
   attempts: number;
   status: 'pending' | 'failed';
   error?: string;
+  /** Don't try again before this time (ms since epoch): the backoff after a server error. */
+  nextAttemptAt?: number;
 }
 
 export interface OutboxState {
@@ -61,7 +67,36 @@ export interface FlushResult {
 }
 
 const STORAGE_KEY = 'neri.outbox.v1';
-const MAX_ATTEMPTS = 6;
+/** With `backoffDelay` this rides out roughly 20 minutes of server trouble before giving up on an item. */
+export const MAX_ATTEMPTS = 8;
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_MAX_MS = 5 * 60_000;
+
+/** How long to wait before retry number `attempts` (1-based): 5s, 15s, 45s, 2m15s, then 5 minutes. */
+export function backoffDelay(attempts: number): number {
+  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 3 ** Math.max(0, attempts - 1));
+}
+
+/** What a failed replay looked like, without depending on the API client. */
+export interface FailureInfo {
+  status: number;
+  /** Couldn't reach the server at all (offline, DNS, timeout). */
+  isNetwork: boolean;
+}
+
+/** Decide what a failed replay means (see `Verdict`). `null` is an error that isn't an API error. */
+export function classifyFailure(error: FailureInfo | null, op: OutboxOp): Verdict {
+  if (!error) return 'fail';
+  if (error.isNetwork) return 'network';
+  // The session expired: keep everything, it is sent after signing back in
+  if (error.status === 401) return 'network';
+  if (error.status === 408 || error.status === 429 || error.status >= 500) return 'retry';
+  // Already gone: nothing left to delete or edit
+  if (error.status === 404 && (op.type === 'deleteTodo' || op.type === 'updateTodo' || (op.type === 'restDay' && !op.on))) return 'done';
+  // Already there: replaying "take a rest day" for a day that already is one has done its job
+  if (error.status === 409 && op.type === 'restDay' && op.on) return 'done';
+  return 'fail';
+}
 
 /* ---------- Pure helpers ---------- */
 
@@ -151,7 +186,9 @@ export function coalesce(entries: OutboxEntry[], entry: OutboxEntry, lockedId?: 
   if (op.type === 'deleteTodo') {
     const id = op.id;
     const created = list.some((e) => mine(e) && e.op.type === 'createTodo' && e.op.body.client_id === id);
-    if (created && op.scope === 'this') {
+    // A repeating task is a series, not one row: deleting "this occurrence" must not cancel the whole create
+    const createdRepeating = list.some((e) => mine(e) && e.op.type === 'createTodo' && e.op.body.client_id === id && Boolean(e.op.body.repeat));
+    if (created && !createdRepeating && op.scope === 'this') {
       // Never reached the server: forget the task entirely
       return list.filter((e) => !(mine(e) && todoIdOf(e.op) === id));
     }
@@ -181,7 +218,11 @@ export interface Outbox {
   ): Promise<FlushResult>;
   retryFailed(owner: string): Promise<void>;
   discard(owner: string, id?: string): Promise<void>;
-  /** Drop everything that belongs to a different account. */
+  /** Show counts for this account only (null: nobody is signed in). Other accounts' entries are kept, untouched. */
+  setViewer(owner: string | null): void;
+  /** Add already-timestamped operations (e.g. widget taps) in time order, without folding them. */
+  adopt(owner: string, items: { op: OutboxOp; createdAt: number }[]): Promise<void>;
+  /** Drop everything that belongs to a different account. Nothing in the app calls this on its own any more. */
   purgeOthers(owner: string): Promise<void>;
   clear(): Promise<void>;
 }
@@ -191,13 +232,16 @@ export function createOutbox(kv: KV, now: () => number = Date.now): Outbox {
   let state: OutboxState = { pending: 0, failed: 0, flushing: false };
   let flushing: Promise<FlushResult> | null = null;
   let inflightId: string | null = null;
+  // undefined: count everything (tests); string/null: only that account (null = nobody)
+  let viewer: string | null | undefined;
   const listeners = new Set<() => void>();
   // Writes happen one at a time, in order, so a slow write never lands after a newer one
   let writes: Promise<void> = Promise.resolve();
 
   const recompute = () => {
-    const pending = list.filter((e) => e.status === 'pending').length;
-    const failed = list.length - pending;
+    const shown = viewer === undefined ? list : list.filter((e) => e.owner === viewer);
+    const pending = shown.filter((e) => e.status === 'pending').length;
+    const failed = shown.length - pending;
     if (pending !== state.pending || failed !== state.failed || (flushing !== null) !== state.flushing) {
       state = { pending, failed, flushing: flushing !== null };
     }
@@ -239,6 +283,26 @@ export function createOutbox(kv: KV, now: () => number = Date.now): Outbox {
       await commit(coalesce(list, entry, inflightId));
     },
 
+    setViewer(owner) {
+      viewer = owner;
+      emit();
+    },
+
+    async adopt(owner, items) {
+      if (!items.length) return;
+      const added: OutboxEntry[] = items.map((i) => ({
+        id: newClientId(),
+        owner,
+        op: i.op,
+        createdAt: i.createdAt,
+        attempts: 0,
+        status: 'pending',
+      }));
+      // Stable sort by time: entries that were already queued keep their order
+      const merged = [...list, ...added].map((e, i) => ({ e, i })).sort((a, b) => a.e.createdAt - b.e.createdAt || a.i - b.i);
+      await commit(merged.map((m) => m.e));
+    },
+
     entries: () => list,
     getState: () => state,
     hasPending: (owner) => list.some((e) => e.owner === owner && e.status === 'pending'),
@@ -260,6 +324,11 @@ export function createOutbox(kv: KV, now: () => number = Date.now): Outbox {
         for (;;) {
           const next = list.find((e) => e.owner === owner && e.status === 'pending');
           if (!next) break;
+          // Waiting out a backoff: later operations must not overtake it
+          if (next.nextAttemptAt && next.nextAttemptAt > now()) {
+            result.blocked = true;
+            break;
+          }
           inflightId = next.id;
           try {
             await execute(next.op, next);
@@ -274,13 +343,25 @@ export function createOutbox(kv: KV, now: () => number = Date.now): Outbox {
               result.blocked = true;
               break;
             } else if (verdict === 'retry' && next.attempts + 1 < MAX_ATTEMPTS) {
-              await commit(list.map((e) => (e.id === next.id ? { ...e, attempts: e.attempts + 1 } : e)));
+              const attempts = next.attempts + 1;
+              await commit(list.map((e) => (e.id === next.id ? { ...e, attempts, nextAttemptAt: now() + backoffDelay(attempts) } : e)));
               result.blocked = true;
               break;
             } else {
               result.failed++;
+              const dependsOnIt = (e: OutboxEntry) =>
+                e.id !== next.id && e.owner === owner && e.status === 'pending' && todoIdOf(e.op) !== null && todoIdOf(e.op) === todoIdOf(next.op);
+              const held = list.filter(dependsOnIt).length;
+              result.failed += held;
               await commit(
-                list.map((e) => (e.id === next.id ? { ...e, attempts: e.attempts + 1, status: 'failed', error: message } : e)),
+                list.map((e) => {
+                  if (e.id === next.id) return { ...e, attempts: e.attempts + 1, status: 'failed', error: message, nextAttemptAt: undefined };
+                  // Later edits to the same task can't work without it: keep them visibly, don't lose them
+                  if (dependsOnIt(e)) {
+                    return { ...e, status: 'failed', error: `Not sent because the earlier change to this task (${describeOp(next.op)}) was rejected.` };
+                  }
+                  return e;
+                }),
               );
             }
           }
@@ -297,7 +378,7 @@ export function createOutbox(kv: KV, now: () => number = Date.now): Outbox {
     },
 
     async retryFailed(owner) {
-      await commit(list.map((e) => (e.owner === owner && e.status === 'failed' ? { ...e, status: 'pending', attempts: 0, error: undefined } : e)));
+      await commit(list.map((e) => (e.owner === owner && e.status === 'failed' ? { ...e, status: 'pending', attempts: 0, error: undefined, nextAttemptAt: undefined } : e)));
     },
 
     async discard(owner, id) {

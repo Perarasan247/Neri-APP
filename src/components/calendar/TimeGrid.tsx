@@ -5,7 +5,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import type { Todo } from '@/api/types';
 import { Text } from '@/components/ui';
 import { withAlpha } from '@/components/ui/HabitIcon';
-import { parseISODate, taskTimeLabel } from '@/lib/format';
+import { nowInZone, parseISODate, taskTimeLabel } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
@@ -34,10 +34,8 @@ const PILL_H = 20;
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const hourLabel = (h: number) => `${h % 12 || 12} ${h >= 12 ? 'pm' : 'am'}`;
-const nowMinutes = () => {
-  const d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
-};
+/** Minutes since midnight in the user's timezone (the now-line follows the profile, not the device clock). */
+const nowMinutes = () => nowInZone().minutes;
 
 /** Imperative scrolling used by the screen's today / chevron / jump controls. */
 export interface TimeGridHandle {

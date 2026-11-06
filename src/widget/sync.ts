@@ -9,11 +9,13 @@ import * as api from '@/api/endpoints';
 import type { Todo, TodayData } from '@/api/types';
 import { loadApiUrlOverride } from '@/lib/config';
 import { loadProfile } from '@/lib/onboarded';
+import { readStoredOwner } from '@/lib/storedOwner';
 import { formatTime, setAppTimeZone, today } from '@/lib/format';
 
 import {
   applyAction,
   applyQueue,
+  isOwnedBy,
   readQueue,
   readSnapshot,
   renameHabit,
@@ -76,6 +78,7 @@ function habitsFrom(data: TodayData) {
 }
 
 const signedOutSnapshot = (prev: WidgetSnapshot | null): WidgetSnapshot => ({
+  owner: null,
   date: prev?.date ?? today(),
   timezone: prev?.timezone ?? 'Asia/Kolkata',
   signedOut: true,
@@ -89,6 +92,10 @@ const signedOutSnapshot = (prev: WidgetSnapshot | null): WidgetSnapshot => ({
 
 async function fetchSnapshot(prev: WidgetSnapshot | null): Promise<WidgetSnapshot> {
   await ensureConfig();
+  const owner = await readStoredOwner();
+  // Never keep showing, or mixing taps into, another account's data
+  if (!owner) return signedOutSnapshot(prev);
+  if (prev && prev.owner !== undefined && prev.owner !== owner) prev = null;
 
   let timezone = prev && !prev.signedOut ? prev.timezone : null;
   if (!timezone) {
@@ -113,6 +120,7 @@ async function fetchSnapshot(prev: WidgetSnapshot | null): Promise<WidgetSnapsho
     .map(toTask);
 
   return {
+    owner,
     date: todayData.date,
     timezone,
     signedOut: false,
@@ -131,22 +139,34 @@ async function fetchSnapshot(prev: WidgetSnapshot | null): Promise<WidgetSnapsho
 
 /* ---------- Pending taps ---------- */
 
-/** Sends one queued action. Resolves to the new habit's id for `habit_create`. */
+/**
+ * Sends one queued action. Resolves to the new habit's id for `habit_create`.
+ * Every action is an absolute statement ("this task is completed", "this habit's count is 3"), so a
+ * resend after a lost reply changes nothing; creates carry a `client_id` where the server supports one.
+ */
 async function send(a: WidgetAction): Promise<string | void> {
   switch (a.kind) {
     case 'habit_set':
       await api.upsertLog({ habit_id: a.habitId, log_date: a.date, count: a.done ? 1 : 0, status: 'done' });
       return;
     case 'habit_inc':
-      await api.incrementLog(a.habitId, a.date, a.delta);
+      if (a.count !== undefined) await api.upsertLog({ habit_id: a.habitId, log_date: a.date, count: a.count, status: 'done' });
+      else await api.incrementLog(a.habitId, a.date, a.delta); // queued by an older version
       return;
     case 'todo_toggle':
-      await api.toggleTodo(a.todoId);
+      if (a.done !== undefined) await api.updateTodo(a.todoId, { status: a.done ? 'completed' : 'pending' }, 'this');
+      else await api.toggleTodo(a.todoId); // queued by an older version
       return;
     case 'todo_create':
       await api.createTodo({ client_id: a.clientId, title: a.title, ...(a.date ? { due_date: a.date } : {}) });
       return;
     case 'habit_create': {
+      // The server has no idempotency key for habits. If an earlier try may have gone through (we sent it
+      // and never saw the answer), adopt the habit it created instead of making a second one.
+      if (a.attempted) {
+        const existing = (await api.getHabits('active')).find((h) => h.name === a.name && h.periods.some((p) => p.start_date === a.date));
+        if (existing) return existing.id;
+      }
       // Same defaults as the app's "New habit" form, every day
       const habit = await api.createHabit({
         name: a.name,
@@ -164,8 +184,12 @@ async function send(a: WidgetAction): Promise<string | void> {
 
 /** Record a tap: queued for the server and visible immediately through `loadView()`. */
 export function enqueue(action: WidgetActionInput): Promise<void> {
-  const full: WidgetAction = { ...action, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() };
-  return serial(async () => writeQueue([...(await readQueue()), full]));
+  return serial(async () => {
+    // Tagged with whose tap it is, like the app's outbox: it is only ever sent (or shown) for that account
+    const owner = (await readSnapshot())?.owner ?? null;
+    const full: WidgetAction = { ...action, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), owner };
+    await writeQueue([...(await readQueue()), full]);
+  });
 }
 
 let flushing: Promise<number> | null = null;
@@ -174,13 +198,20 @@ let flushing: Promise<number> | null = null;
 export function flushQueue(): Promise<number> {
   return (flushing ??= (async () => {
     await ensureConfig();
+    // Only the signed-in account's taps are sent; another account's stay queued until it signs back in
+    const owner = await readStoredOwner();
+    if (!owner) return 0;
     let sent = 0;
     for (;;) {
-      const [next] = await serial(readQueue);
+      const next = (await serial(readQueue)).find((a) => isOwnedBy(a, owner));
       if (!next) break;
       let accepted = true;
       let createdId: string | void = undefined;
       try {
+        if (next.kind === 'habit_create' && !next.attempted) {
+          // Remember that this create is now in flight: if the answer is lost, the retry looks before creating
+          await serial(async () => writeQueue((await readQueue()).map((a) => (a.id === next.id ? { ...a, attempted: true } : a))));
+        }
         createdId = await send(next);
         sent++;
       } catch (e) {
@@ -252,10 +283,12 @@ export function syncWidgetData(): Promise<number> {
   return syncing;
 }
 
-/** Called on sign-out so the widget stops showing the previous account's data. */
+/**
+ * Called on sign-out so the widget stops showing the previous account's data. Its queued taps are kept
+ * (tagged with their account) and sent when that account signs back in: a lapsed session must not lose them.
+ */
 export function markSignedOut(): Promise<void> {
   return serial(async () => {
-    await writeQueue([]);
     await writeSnapshot(signedOutSnapshot(await readSnapshot()));
   });
 }

@@ -24,8 +24,11 @@ for (const name of required) {
 
 const api = (process.env.EXPO_PUBLIC_API_URL || '').trim();
 if (api) {
-  if (!/^https?:\/\//i.test(api)) problems.push('EXPO_PUBLIC_API_URL must start with http:// or https://');
-  else if (/^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(api)) {
+  if (!/^https:\/\//i.test(api)) {
+    // The login token is sent to this address with every request, so a shipped app must use TLS
+    problems.push('EXPO_PUBLIC_API_URL must start with https:// (a production app must not send sign-in tokens over plain http)');
+  }
+  if (/^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(api)) {
     problems.push(`EXPO_PUBLIC_API_URL (${api}) is a local address; an installed app can't reach it`);
   }
 }

@@ -20,6 +20,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "app.neri.habits",
+      "allowBackup": false,
       "versionCode": 1,
       "softwareKeyboardLayoutMode": "resize"
     },
@@ -65,7 +66,8 @@
         }
       ],
       "expo-sharing",
-      "./plugins/widget-quick-add/withWidgetQuickAdd.js"
+      "./plugins/widget-quick-add/withWidgetQuickAdd.js",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

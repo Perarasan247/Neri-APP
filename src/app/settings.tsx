@@ -94,8 +94,9 @@ export default function SettingsScreen() {
       [
         isDemo ? 'You can come back to the demo any time.' : 'You’ll need your password to sign back in.',
         waiting > 0
-          ? `\n${waiting} change${waiting === 1 ? ' hasn’t' : 's haven’t'} synced yet. They stay on this device and are sent when you sign back in to this account.`
+          ? `\n\n${waiting} change${waiting === 1 ? ' hasn’t' : 's haven’t'} synced yet. ${waiting === 1 ? 'It stays' : 'They stay'} on this device, kept for this account only, and ${waiting === 1 ? 'is' : 'are'} sent when you sign back in to it. Until then ${waiting === 1 ? 'it isn’t' : 'they aren’t'} on the server.`
           : '',
+        isDefaultUrl ? '' : '\n\nThe custom server address will be reset.',
       ].join(''),
       [
       { text: 'Cancel', style: 'cancel' },
