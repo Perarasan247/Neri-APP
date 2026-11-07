@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { ArrowUp, Check, CheckSquare, ChevronLeft, ChevronRight, Repeat, Target } from 'lucide-react-native';
+import { ArrowUp, Check, CheckSquare, ChevronLeft, ChevronRight, Pencil, Repeat, Target } from 'lucide-react-native';
 
 import type { Goal, GoalLevel } from '@/api/types';
 import { Badge, IconButton, ProgressBar, Text, withAlpha } from '@/components/ui';
@@ -12,6 +12,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
 
 export const openGoal = (id: string) => router.push({ pathname: '/goal/[id]', params: { id } });
+export const editGoal = (id: string) => router.push({ pathname: '/goal/[id]/edit', params: { id } });
 
 /** Status pill; nothing for active goals unless `showActive`. */
 export function GoalStatusBadge({ goal, showActive }: { goal: Pick<Goal, 'status' | 'needs_review'>; showActive?: boolean }) {
@@ -176,6 +177,9 @@ export function GoalRow({ goal, onToggle, last }: { goal: Goal; onToggle: (goal:
           </View>
         ) : null}
       </Pressable>
+      <IconButton label={`Edit ${goal.title}`} size={34} onPress={() => editGoal(goal.id)}>
+        <Pencil size={16} color={colors.fgSubtle} />
+      </IconButton>
     </View>
   );
 }
