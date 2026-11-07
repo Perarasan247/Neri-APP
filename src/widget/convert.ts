@@ -25,7 +25,21 @@ export function widgetActionToOp(a: WidgetAction): OutboxOp | null {
         : { type: 'updateTodo', id: a.todoId, patch: { status: a.done ? 'completed' : 'pending' }, scope: 'this' };
     case 'todo_create':
       return { type: 'createTodo', body: { client_id: a.clientId, title: a.title, ...(a.date ? { due_date: a.date } : {}) } };
+    case 'habit_value':
+      if (TEMP.test(a.habitId)) return null;
+      return { type: 'addValue', body: { habit_id: a.habitId, entry_date: a.date, value: a.value, client_id: a.clientId } };
+    case 'todo_update':
+      return {
+        type: 'updateTodo',
+        id: a.todoId,
+        patch: { ...(a.title !== undefined ? { title: a.title } : {}), ...(a.date !== undefined ? { due_date: a.date } : {}) },
+        scope: 'this',
+      };
+    case 'todo_delete':
+      return { type: 'deleteTodo', id: a.todoId, scope: 'this' };
     case 'habit_create':
+    case 'habit_delete':
+      // The outbox has no habit create/delete: these stay in the widget's own queue
       return null;
   }
 }

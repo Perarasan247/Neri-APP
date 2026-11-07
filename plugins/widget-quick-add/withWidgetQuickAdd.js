@@ -40,7 +40,7 @@ function withActivityManifest(config) {
       $: {
         'android:name': ACTIVITY,
         // Must be exported: Android 14+ only delivers implicit (deep link) intents to exported activities.
-        // It only shows a form; nothing is created until the user presses Add.
+        // It only shows a form; nothing changes until the user presses Add / Save / a confirmed Delete.
         'android:exported': 'true',
         'android:theme': `@style/${THEME}`,
         // Own task, gone from Recents once closed: the app's task is never brought forward
@@ -54,7 +54,11 @@ function withActivityManifest(config) {
         {
           action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
           category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-          data: [{ $: { 'android:scheme': SCHEME, 'android:host': 'add' } }],
+          // add: the "+" quick-add sheet · edit: tapping a row (edit, complete, delete)
+          data: [
+            { $: { 'android:scheme': SCHEME, 'android:host': 'add' } },
+            { $: { 'android:scheme': SCHEME, 'android:host': 'edit' } },
+          ],
         },
       ],
     });

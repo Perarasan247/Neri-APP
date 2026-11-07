@@ -57,3 +57,21 @@ describe('widget owners', () => {
     expect(once.today[0].done).toBe(true);
   });
 });
+
+describe('editor actions', () => {
+  it('hands task edits, deletes and values to the outbox; habit deletes stay', () => {
+    expect(widgetActionToOp(act({ kind: 'todo_update', todoId: 't', title: 'New', date: null }))).toEqual({
+      type: 'updateTodo',
+      id: 't',
+      patch: { title: 'New', due_date: null },
+      scope: 'this',
+    });
+    expect(widgetActionToOp(act({ kind: 'todo_delete', todoId: 't' }))).toEqual({ type: 'deleteTodo', id: 't', scope: 'this' });
+    expect(widgetActionToOp(act({ kind: 'habit_value', habitId: 'h', date: '2026-11-01', value: 3, clientId: 'c' }))).toEqual({
+      type: 'addValue',
+      body: { habit_id: 'h', entry_date: '2026-11-01', value: 3, client_id: 'c' },
+    });
+    expect(widgetActionToOp(act({ kind: 'habit_value', habitId: 'tmp-1', date: '2026-11-01', value: 3, clientId: 'c' }))).toBeNull();
+    expect(widgetActionToOp(act({ kind: 'habit_delete', habitId: 'h', keepData: true }))).toBeNull();
+  });
+});

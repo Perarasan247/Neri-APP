@@ -74,6 +74,9 @@ function habitsFrom(data: TodayData) {
       streak: i.current_streak,
       streakUnit: i.streak_unit ?? 'day',
       opensApp: i.habit.type === 'avoid_count' || Boolean(i.habit.metric_label),
+      metricLabel: i.habit.metric_label ?? null,
+      metricUnit: i.habit.metric_unit ?? null,
+      metricTotal: i.metric_total ?? null,
     }));
 }
 
@@ -179,6 +182,22 @@ async function send(a: WidgetAction): Promise<string | void> {
       });
       return habit.id;
     }
+    case 'habit_value':
+      await api.addValueEntry(a.habitId, a.date, a.value, a.clientId);
+      return;
+    case 'habit_delete':
+      await api.deleteHabit(a.habitId, a.keepData);
+      return;
+    case 'todo_update':
+      await api.updateTodo(
+        a.todoId,
+        { ...(a.title !== undefined ? { title: a.title } : {}), ...(a.date !== undefined ? { due_date: a.date } : {}) },
+        'this',
+      );
+      return;
+    case 'todo_delete':
+      await api.deleteTodo(a.todoId, 'this');
+      return;
   }
 }
 

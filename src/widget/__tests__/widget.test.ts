@@ -3,7 +3,7 @@
  * page/state through the library's own tree builder (the same validation that
  * runs before Android draws the widget).
  */
-import { MAX_ROWS, quickAddUri, renderNeriWidget } from '../NeriWidget';
+import { editUri, MAX_ROWS, quickAddUri, renderNeriWidget, rowLimit } from '../NeriWidget';
 import { applyAction, applyQueue, DEFAULT_VIEW_STATE, renameHabit, type WidgetAction, type WidgetSnapshot } from '../store';
 
 // Hoisted above the imports by Jest: the widget library only needs a few React Native stubs
@@ -99,6 +99,73 @@ describe('optimistic updates', () => {
   });
 });
 
+describe('editing from the widget', () => {
+  it('renames and moves a task off Today into the inbox, in date order', () => {
+    const s = applyAction(snapshot(), act({ kind: 'todo_update', todoId: 't1', title: 'Call the bank', date: '2026-11-06' }));
+    expect(s.today.map((t) => t.id)).toEqual(['t0']);
+    expect(s.inbox.map((t) => t.id)).toEqual(['t0', 't2', 't1', 't3']);
+    expect(s.inbox[2]).toMatchObject({ title: 'Call the bank', date: '2026-11-06' });
+  });
+
+  it('moves an undated task onto Today', () => {
+    const s = applyAction(snapshot(), act({ kind: 'todo_update', todoId: 't3', date: NOW }));
+    expect(s.today.map((t) => t.id)).toEqual(['t0', 't1', 't3']);
+    expect(s.inbox.at(-1)?.id).toBe('t2');
+  });
+
+  it('renames in place when the date is untouched', () => {
+    const s = applyAction(snapshot(), act({ kind: 'todo_update', todoId: 't0', title: 'Older thing' }));
+    expect(s.today[0].title).toBe('Older thing');
+    expect(s.inbox[0].title).toBe('Older thing');
+  });
+
+  it('deletes a task from both lists and a habit from the page', () => {
+    const s = applyQueue(snapshot(), [
+      act({ kind: 'todo_delete', todoId: 't1' }),
+      { ...act({ kind: 'habit_delete', habitId: 'h2', keepData: true }), id: 'y' } as WidgetAction,
+    ]);
+    expect(s.today.map((t) => t.id)).toEqual(['t0']);
+    expect(s.inbox.map((t) => t.id)).toEqual(['t0', 't2', 't3']);
+    expect(s.habits.map((h) => h.id)).toEqual(['h1', 'h3']);
+  });
+
+  it('sets an exact count, including undoing a finished count habit', () => {
+    const done = applyAction(snapshot(), act({ kind: 'habit_inc', habitId: 'h2', date: NOW, delta: 1, count: 8 }));
+    const undone = applyAction(done, { ...act({ kind: 'habit_inc', habitId: 'h2', date: NOW, delta: -2, count: 6 }), id: 'y' } as WidgetAction);
+    expect(undone.habits[1]).toMatchObject({ count: 6, done: false, streak: 0 });
+  });
+
+  it('treats slips on an avoid habit as breaking the clean day', () => {
+    const slip = applyAction(snapshot(), act({ kind: 'habit_inc', habitId: 'h3', date: NOW, delta: 1, count: 1 }));
+    expect(slip.habits[2]).toMatchObject({ count: 1, done: false, streak: 8 });
+    const back = applyAction(slip, { ...act({ kind: 'habit_inc', habitId: 'h3', date: NOW, delta: -1, count: 0 }), id: 'y' } as WidgetAction);
+    expect(back.habits[2]).toMatchObject({ count: 0, done: true, streak: 9 });
+  });
+
+  it('logs a value and marks the habit done', () => {
+    const base = snapshot({ habits: [{ ...snapshot().habits[0], metricLabel: 'Pages', metricUnit: 'pages', metricTotal: 5, opensApp: true }] });
+    const s = applyAction(base, act({ kind: 'habit_value', habitId: 'h1', date: NOW, value: 10, clientId: 'c1' }));
+    expect(s.habits[0]).toMatchObject({ done: true, metricTotal: 15, streak: 3 });
+  });
+
+  it('follows edits on a just-created habit to its real id', () => {
+    const q = renameHabit(
+      [act({ kind: 'habit_value', habitId: 'tmp-1', date: NOW, value: 2, clientId: 'c' }), act({ kind: 'habit_delete', habitId: 'tmp-1', keepData: false })],
+      'tmp-1',
+      'real-1',
+    );
+    expect(q.every((a) => 'habitId' in a && a.habitId === 'real-1')).toBe(true);
+  });
+
+  it('opens the editor with what it needs to show', () => {
+    const quick = { widgetId: 3, accentLight: '#635bff', accentDark: '#7c74ff' };
+    const h = new URLSearchParams(editUri(quick, { habit: snapshot().habits[1] }, NOW).split('?')[1]);
+    expect(Object.fromEntries(h)).toMatchObject({ kind: 'habit', id: 'h2', title: 'Water', htype: 'count', count: '7', target: '8', done: '0', widget: '3' });
+    const t = new URLSearchParams(editUri(quick, { task: snapshot().inbox[3] }, NOW).split('?')[1]);
+    expect(Object.fromEntries(t)).toMatchObject({ kind: 'task', id: 't3', title: 'Someday', date: '', today: NOW, tomorrow: '2026-11-02' });
+  });
+});
+
 describe('quick add', () => {
   it('links the + button to the popup, not the app', () => {
     const uri = quickAddUri({ widgetId: 7, accentLight: '#635bff', accentDark: '#7c74ff' }, 'task', NOW, 'today');
@@ -120,6 +187,8 @@ describe('rendering', () => {
   const sizes = [
     { width: 320, height: 300 },
     { width: 200, height: 120 },
+    { width: 180, height: 100 },
+    { width: 520, height: 600 },
   ];
   const cases: [string, WidgetSnapshot | null, typeof DEFAULT_VIEW_STATE][] = [
     ['habits', snapshot(), DEFAULT_VIEW_STATE],
@@ -162,12 +231,34 @@ describe('rendering', () => {
     expect(headers).toEqual(['OVERDUE', 'TODAY', 'THURSDAY', 'NO DATE']);
   });
 
-  it('draws at most MAX_ROWS rows and says how many more there are', () => {
+  it('draws only the rows a widget of its height needs and says how many more there are', () => {
+    const limit = rowLimit(300);
+    expect(limit).toBeLessThanOrEqual(MAX_ROWS);
     const many = Array.from({ length: MAX_ROWS + 10 }, (_, i) => ({ ...snapshot().inbox[3], id: `m${i}`, title: `Task ${i}` }));
     const t = render(snapshot({ inbox: many }), { page: 'tasks', taskView: 'inbox' });
-    expect(t).toContain(`Task ${MAX_ROWS - 2}`);
-    expect(t).not.toContain(`Task ${MAX_ROWS + 5}`);
-    expect(t).toContain('11 more · open Neri');
+    // One row is the "NO DATE" header
+    expect(t).toContain(`Task ${limit - 2}`);
+    expect(t).not.toContain(`Task ${limit}`);
+    expect(t).toContain(`${MAX_ROWS + 10 - (limit - 1)} more · open Neri`);
+  });
+
+  it('scales the row cap with height, within bounds', () => {
+    expect(rowLimit(110)).toBe(8);
+    expect(rowLimit(2000)).toBe(MAX_ROWS);
+    expect(rowLimit(400)).toBeGreaterThan(rowLimit(250));
+  });
+
+  it('links rows to the editor sheet, never the app', () => {
+    const out = buildWidgetTree((renderNeriWidget(snapshot(), DEFAULT_VIEW_STATE, NOW, { width: 320, height: 300 }) as any).light);
+    const uris: string[] = [];
+    const walk = (n: any) => {
+      const u = n.props?.clickActionData?.uri;
+      if (typeof u === 'string') uris.push(u);
+      (n.children ?? []).forEach(walk);
+    };
+    walk(out);
+    expect(uris.some((u) => u.startsWith('neri://habit/'))).toBe(false);
+    expect(uris.filter((u) => u.startsWith('neri-widget://edit?')).length).toBeGreaterThanOrEqual(3);
   });
 
   it('splits Today into overdue and today', () => {

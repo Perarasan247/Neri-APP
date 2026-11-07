@@ -30,13 +30,27 @@ export const ACTIONS = {
   refresh: 'REFRESH',
   /** Sent by the native quick-add popup (plugins/widget-quick-add), not by a widget tap. */
   quickAdd: 'QUICK_ADD',
+  /** Sent by the native editor sheet (same activity, neri-widget://edit): save, complete, delete. */
+  edit: 'ITEM_EDIT',
 } as const;
 
 /**
- * Rows drawn per list. The library paints every row to a bitmap (twice, light
- * and dark), so a long list makes every tap slow; the rest is one tap away in the app.
+ * Most rows drawn per list. The library paints every row to a PNG (twice, light
+ * and dark) on every redraw, so rows cost tap latency; see rowLimit().
  */
 export const MAX_ROWS = 25;
+
+/** Approximate height of one row in dp (38dp tap target + padding + divider). */
+const ROW_DP = 51;
+
+/**
+ * How many rows to draw for a widget this tall: what fits plus a screenful to
+ * scroll into, never more than MAX_ROWS. A short widget redraws much faster.
+ */
+export function rowLimit(height: number): number {
+  const visible = Math.max(1, Math.floor((height - 90) / ROW_DP));
+  return Math.min(MAX_ROWS, Math.max(8, visible * 2 + 2));
+}
 
 /** Where the quick-add popup sends what the user typed; opened without starting the app. */
 export interface QuickAdd {
@@ -60,6 +74,40 @@ export function quickAddUri(q: QuickAdd, kind: 'habit' | 'task', now: string, da
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join('&');
   return `neri-widget://add?${query}`;
+}
+
+const toQuery = (params: Record<string, string | number | boolean | null | undefined>) =>
+  Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join('&');
+
+/** How the editor sheet should treat a habit. */
+export const habitKind = (h: WidgetHabit) =>
+  h.type === 'avoid_count' ? 'avoid' : h.metricLabel ? 'metric' : h.target ? 'count' : 'yesno';
+
+/** Deep link to the editor sheet for a row (handled by QuickAddActivity, never the app). */
+export function editUri(q: QuickAdd, item: { habit: WidgetHabit } | { task: WidgetTask }, now: string): string {
+  const common = { widget: q.widgetId, accent: q.accentLight, accentDark: q.accentDark, today: now, tomorrow: addDays(now, 1) };
+  if ('habit' in item) {
+    const h = item.habit;
+    return `neri-widget://edit?${toQuery({
+      ...common,
+      kind: 'habit',
+      id: h.id,
+      title: h.name,
+      htype: habitKind(h),
+      done: h.done ? 1 : 0,
+      count: h.count,
+      target: h.target,
+      label: h.metricLabel,
+      unit: h.metricUnit,
+      total: h.metricTotal,
+      streak: h.streak > 0 ? `${h.streak} ${h.streakUnit}${h.streak === 1 ? '' : 's'}` : null,
+    })}`;
+  }
+  const t = item.task;
+  return `neri-widget://edit?${toQuery({ ...common, kind: 'task', id: t.id, title: t.title, date: t.date ?? '', done: t.done ? 1 : 0 })}`;
 }
 
 /* ---------- Theme ---------- */
@@ -117,13 +165,6 @@ const asHex = (c: string | undefined, fallback: Hex): Hex => (c && /^#[0-9a-f]{6
 
 /* ---------- SVG icons ---------- */
 
-const CHECK_PATH = 'M7.5 12.5l3 3 6-6.5';
-
-const svgCircle = (color: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
-
-const svgChecked = (color: string, tick: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5" fill="${color}"/><path d="${CHECK_PATH}" fill="none" stroke="${tick}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /** Count habit: progress arc around a "+". */
 function svgCounter(color: string, track: string, ratio: number) {
@@ -146,14 +187,35 @@ const svgRefresh = (color: string) =>
 
 /* ---------- Building blocks ---------- */
 
-function Tab({ label, active, onPressData, t }: { label: string; active: boolean; onPressData: object; t: WidgetTheme }) {
+/**
+ * Round checkbox drawn from plain views (a bordered circle, filled with a tick when done).
+ * Much cheaper to paint than an SVG, and it is drawn once per row per theme on every redraw.
+ */
+function Check({ done, color, size = 22 }: { done: boolean; color: Hex; size?: number }) {
+  return (
+    <FlexWidget
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        ...(done ? { backgroundColor: color } : { borderWidth: 2, borderColor: color }),
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {done ? <TextWidget text="✓" style={{ fontSize: size * 0.6, fontWeight: '700', color: '#ffffff' }} /> : null}
+    </FlexWidget>
+  );
+}
+
+function Tab({ label, active, onPressData, t, narrow }: { label: string; active: boolean; onPressData: object; t: WidgetTheme; narrow?: boolean }) {
   return (
     <FlexWidget
       clickAction={ACTIONS.setPage}
       clickActionData={onPressData as Record<string, unknown>}
       accessibilityLabel={`Show ${label}`}
       style={{
-        paddingHorizontal: 14,
+        paddingHorizontal: narrow ? 10 : 14,
         paddingVertical: 6,
         borderRadius: 14,
         backgroundColor: active ? t.accent : t.chip,
@@ -208,12 +270,12 @@ function SectionHeader({ label, color, t }: { label: string; color?: Hex; t: Wid
   );
 }
 
-/** Keep a list to MAX_ROWS rows; the last row says how many more there are and opens the app. */
-function capped(rows: React.JSX.Element[], t: WidgetTheme, uri: string): React.JSX.Element[] {
-  if (rows.length <= MAX_ROWS) return rows;
-  const more = rows.slice(MAX_ROWS).filter((r) => !String(r.key).startsWith('h-')).length;
+/** Keep a list to `limit` rows; the last row says how many more there are and opens the app. */
+function capped(rows: React.JSX.Element[], t: WidgetTheme, uri: string, limit: number): React.JSX.Element[] {
+  if (rows.length <= limit) return rows;
+  const more = rows.slice(limit).filter((r) => !String(r.key).startsWith('h-')).length;
   return [
-    ...rows.slice(0, MAX_ROWS),
+    ...rows.slice(0, limit),
     <FlexWidget
       key="more"
       clickAction="OPEN_URI"
@@ -230,26 +292,32 @@ function capped(rows: React.JSX.Element[], t: WidgetTheme, uri: string): React.J
 const streakLabel = (h: WidgetHabit) =>
   h.streak > 0 ? `🔥 ${h.streak} ${h.streakUnit}${h.streak === 1 ? '' : 's'}` : '';
 
-function HabitRow({ h, t }: { h: WidgetHabit; t: WidgetTheme }) {
+function HabitRow({ h, t, quick, now, wide }: { h: WidgetHabit; t: WidgetTheme; quick: QuickAdd; now: string; wide: boolean }) {
   const color = asHex(h.color, t.accent);
-  const icon = h.done
-    ? svgChecked(color, '#ffffff')
-    : h.target
-      ? svgCounter(color, t.line, h.count / h.target)
-      : svgCircle(color);
-  const detail = h.target ? `${h.count} / ${h.target}` : h.opensApp && !h.done ? 'Tap to log in app' : '';
-  const streak = streakLabel(h);
-  // Habits that need the full UI (value logging, "avoid" habits, undoing a count) open Today instead
-  const inApp = h.opensApp || (h.target !== null && h.done);
-  const circleAction = inApp
-    ? { clickAction: 'OPEN_URI', clickActionData: { uri: 'neri://' } }
-    : { clickAction: ACTIONS.habit, clickActionData: { id: h.id } };
+  const kind = habitKind(h);
+  const detail =
+    kind === 'count'
+      ? `${h.count} / ${h.target}`
+      : kind === 'avoid'
+        ? h.count > 0
+          ? `${h.count} slip${h.count === 1 ? '' : 's'} today`
+          : 'Clean today'
+        : kind === 'metric' && h.metricTotal
+          ? `${h.metricTotal}${h.metricUnit ? ` ${h.metricUnit}` : ''} today`
+          : '';
+  const streak = wide ? streakLabel(h) : '';
+  const edit = editUri(quick, { habit: h }, now);
+  // One tap completes a yes/no habit or adds one to a count; anything needing more opens the editor sheet
+  const quickTap = !h.opensApp && !(h.target !== null && h.done);
+  const circleAction = quickTap
+    ? { clickAction: ACTIONS.habit, clickActionData: { id: h.id } }
+    : { clickAction: 'OPEN_URI', clickActionData: { uri: edit } };
 
   return (
     <FlexWidget
       clickAction="OPEN_URI"
-      clickActionData={{ uri: `neri://habit/${h.id}` }}
-      accessibilityLabel={`Open ${h.name}`}
+      clickActionData={{ uri: edit }}
+      accessibilityLabel={`Edit ${h.name}`}
       style={{
         width: 'match_parent',
         flexDirection: 'row',
@@ -262,10 +330,14 @@ function HabitRow({ h, t }: { h: WidgetHabit; t: WidgetTheme }) {
     >
       <FlexWidget
         {...circleAction}
-        accessibilityLabel={inApp ? `Log ${h.name} in Neri` : h.done ? `Mark ${h.name} not done` : `Complete ${h.name}`}
+        accessibilityLabel={!quickTap ? `Update ${h.name}` : h.done ? `Mark ${h.name} not done` : `Complete ${h.name}`}
         style={{ width: 38, height: 38, alignItems: 'center', justifyContent: 'center' }}
       >
-        <SvgWidget svg={icon} style={{ width: 24, height: 24 }} />
+        {kind === 'count' && !h.done ? (
+          <SvgWidget svg={svgCounter(color, t.line, h.count / (h.target ?? 1))} style={{ width: 24, height: 24 }} />
+        ) : (
+          <Check done={h.done} color={color} size={22} />
+        )}
       </FlexWidget>
       <FlexWidget style={{ flex: 1, flexDirection: 'column', marginLeft: 6 }}>
         <TextWidget
@@ -281,7 +353,18 @@ function HabitRow({ h, t }: { h: WidgetHabit; t: WidgetTheme }) {
   );
 }
 
-function HabitsPage({ s, t, compact, addUri }: { s: WidgetSnapshot; t: WidgetTheme; compact: boolean; addUri: string }) {
+interface Layout {
+  /** No summary row at all: every dp goes to the list. */
+  tiny: boolean;
+  /** One-line summary instead of the ring. */
+  compact: boolean;
+  /** Room for streaks and the sync button. */
+  wide: boolean;
+  limit: number;
+}
+
+function HabitsPage({ s, t, layout, addUri, quick, now }: { s: WidgetSnapshot; t: WidgetTheme; layout: Layout; addUri: string; quick: QuickAdd; now: string }) {
+  const { compact } = layout;
   if (s.isRestDay) return <Empty t={t} title="Rest day 🌿" subtitle="No habits today. Enjoy the break." />;
   if (s.habits.length === 0) return <Empty t={t} title="No habits due today" subtitle="Tap + to add a habit" uri={addUri} />;
 
@@ -293,7 +376,7 @@ function HabitsPage({ s, t, compact, addUri }: { s: WidgetSnapshot; t: WidgetThe
   const subtitle = s.overallStreak > 0 ? `🔥 ${s.overallStreak}-day streak` : `${Math.round(ratio * 100)}% of today`;
   const color = allDone ? t.success : t.accent;
 
-  const progress = compact ? (
+  const progress = layout.tiny ? null : compact ? (
     // Short widget: one-line summary with a slim bar
     <FlexWidget style={{ width: 'match_parent', flexDirection: 'column', paddingVertical: 6, paddingHorizontal: 2 }}>
       <FlexWidget style={{ width: 'match_parent', flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -325,9 +408,10 @@ function HabitsPage({ s, t, compact, addUri }: { s: WidgetSnapshot; t: WidgetThe
       {progress}
       <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
         {capped(
-          s.habits.map((h) => <HabitRow key={h.id} h={h} t={t} />),
+          s.habits.map((h) => <HabitRow key={h.id} h={h} t={t} quick={quick} now={now} wide={layout.wide} />),
           t,
           'neri://',
+          layout.limit,
         )}
       </ListWidget>
     </FlexWidget>
@@ -336,9 +420,15 @@ function HabitsPage({ s, t, compact, addUri }: { s: WidgetSnapshot; t: WidgetThe
 
 /* ---------- Tasks page ---------- */
 
-function TaskRow({ task, t, now, showDate }: { task: WidgetTask; t: WidgetTheme; now: string; showDate: boolean }) {
+interface RowCtx {
+  t: WidgetTheme;
+  now: string;
+  quick: QuickAdd;
+}
+
+function TaskRow({ task, t, now, quick, showDate }: RowCtx & { task: WidgetTask; showDate: boolean }) {
   const overdue = !task.done && task.date !== null && task.date < now;
-  const icon = task.done ? svgChecked(t.accent, '#ffffff') : svgCircle(t.priority[task.priority] ?? t.subtle);
+  const checkColor = task.done ? t.accent : (t.priority[task.priority] ?? t.subtle);
   const dateText = task.date ? friendlyDate(task.date, now) : 'No date';
   const meta = [showDate || overdue ? dateText : '', task.time ?? ''].filter(Boolean).join(' · ');
   const metaColor = overdue ? t.danger : task.date === now ? t.accent : t.muted;
@@ -346,8 +436,8 @@ function TaskRow({ task, t, now, showDate }: { task: WidgetTask; t: WidgetTheme;
   return (
     <FlexWidget
       clickAction="OPEN_URI"
-      clickActionData={{ uri: `neri://task/${task.id}` }}
-      accessibilityLabel={`Open ${task.title}`}
+      clickActionData={{ uri: editUri(quick, { task }, now) }}
+      accessibilityLabel={`Edit ${task.title}`}
       style={{
         width: 'match_parent',
         flexDirection: 'row',
@@ -364,7 +454,7 @@ function TaskRow({ task, t, now, showDate }: { task: WidgetTask; t: WidgetTheme;
         accessibilityLabel={task.done ? `Reopen ${task.title}` : `Complete ${task.title}`}
         style={{ width: 38, height: 38, alignItems: 'center', justifyContent: 'center' }}
       >
-        <SvgWidget svg={icon} style={{ width: 22, height: 22 }} />
+        <Check done={task.done} color={checkColor} size={21} />
       </FlexWidget>
       <FlexWidget style={{ flex: 1, flexDirection: 'column', marginLeft: 6 }}>
         <TextWidget
@@ -380,7 +470,8 @@ function TaskRow({ task, t, now, showDate }: { task: WidgetTask; t: WidgetTheme;
 }
 
 /** Inbox: group open tasks under their day, Todoist style. */
-function inboxRows(tasks: WidgetTask[], t: WidgetTheme, now: string) {
+function inboxRows(tasks: WidgetTask[], ctx: RowCtx) {
+  const { t, now } = ctx;
   const rows: React.JSX.Element[] = [];
   let current: string | undefined;
   for (const task of tasks) {
@@ -390,7 +481,7 @@ function inboxRows(tasks: WidgetTask[], t: WidgetTheme, now: string) {
       current = group;
       rows.push(<SectionHeader key={`h-${group}`} label={group} color={overdue ? t.danger : undefined} t={t} />);
     }
-    rows.push(<TaskRow key={task.id} task={task} t={t} now={now} showDate={overdue} />);
+    rows.push(<TaskRow key={task.id} task={task} {...ctx} showDate={overdue} />);
   }
   return rows;
 }
@@ -401,13 +492,18 @@ function TasksPage({
   view,
   now,
   addUri,
+  quick,
+  limit,
 }: {
   s: WidgetSnapshot;
   t: WidgetTheme;
   view: 'today' | 'inbox';
   now: string;
   addUri: string;
+  quick: QuickAdd;
+  limit: number;
 }) {
+  const ctx: RowCtx = { t, now, quick };
   const overdue = s.today.filter((x) => x.date !== null && x.date < now);
   const planned = s.today.filter((x) => x.date === null || x.date >= now);
   const todayOpen = s.today.filter((x) => !x.done).length;
@@ -427,7 +523,7 @@ function TasksPage({
         <Empty t={t} title="Inbox zero 🎉" subtitle="Tap + to add a task" uri={addUri} />
       ) : (
         <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
-          {capped(inboxRows(s.inbox, t, now), t, 'neri://inbox')}
+          {capped(inboxRows(s.inbox, ctx), t, 'neri://inbox', limit)}
         </ListWidget>
       );
   } else if (s.today.length === 0) {
@@ -438,9 +534,10 @@ function TasksPage({
         <TextWidget text="All done today 🎉" style={{ fontSize: 14, fontWeight: '700', color: t.success, marginBottom: 4, marginLeft: 4 }} />
         <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
           {capped(
-            planned.map((task) => <TaskRow key={task.id} task={task} t={t} now={now} showDate={false} />),
+            planned.map((task) => <TaskRow key={task.id} task={task} {...ctx} showDate={false} />),
             t,
             'neri://',
+            limit,
           )}
         </ListWidget>
       </FlexWidget>
@@ -449,11 +546,11 @@ function TasksPage({
     const rows: React.JSX.Element[] = [];
     if (overdue.length) {
       rows.push(<SectionHeader key="h-overdue" label="Overdue" color={t.danger} t={t} />);
-      overdue.forEach((task) => rows.push(<TaskRow key={task.id} task={task} t={t} now={now} showDate />));
+      overdue.forEach((task) => rows.push(<TaskRow key={task.id} task={task} {...ctx} showDate />));
       rows.push(<SectionHeader key="h-today" label="Today" t={t} />);
     }
-    planned.forEach((task) => rows.push(<TaskRow key={task.id} task={task} t={t} now={now} showDate={false} />));
-    body = <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>{capped(rows, t, 'neri://')}</ListWidget>;
+    planned.forEach((task) => rows.push(<TaskRow key={task.id} task={task} {...ctx} showDate={false} />));
+    body = <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>{capped(rows, t, 'neri://', limit)}</ListWidget>;
   }
 
   return (
@@ -508,13 +605,19 @@ function NeriWidgetView({ snapshot, state, now, width, height, t, quick }: Props
     : quickAddUri(quick, 'task', now, state.taskView === 'today' ? 'today' : 'none');
   const stale = snapshot.date !== now;
   const narrow = width < 230;
+  const layout: Layout = {
+    tiny: height < 150,
+    compact: height < 220,
+    wide: width >= 280,
+    limit: rowLimit(height),
+  };
 
   return (
     <FlexWidget style={root}>
       <FlexWidget style={{ width: 'match_parent', flexDirection: 'row', alignItems: 'center' }}>
         <FlexWidget style={{ flexDirection: 'row', padding: 3, borderRadius: 17, backgroundColor: t.chip }}>
-          <Tab label="Habits" active={onHabits} onPressData={{ page: 'habits' }} t={t} />
-          <Tab label="Tasks" active={!onHabits} onPressData={{ page: 'tasks' }} t={t} />
+          <Tab label="Habits" active={onHabits} onPressData={{ page: 'habits' }} t={t} narrow={narrow} />
+          <Tab label="Tasks" active={!onHabits} onPressData={{ page: 'tasks' }} t={t} narrow={narrow} />
         </FlexWidget>
         <FlexWidget style={{ flex: 1 }} />
         {narrow ? null : (
@@ -546,9 +649,9 @@ function NeriWidgetView({ snapshot, state, now, width, height, t, quick }: Props
       ) : null}
 
       {onHabits ? (
-        <HabitsPage s={snapshot} t={t} compact={height < 200} addUri={addUri} />
+        <HabitsPage s={snapshot} t={t} layout={layout} addUri={addUri} quick={quick} now={now} />
       ) : (
-        <TasksPage s={snapshot} t={t} view={state.taskView} now={now} addUri={addUri} />
+        <TasksPage s={snapshot} t={t} view={state.taskView} now={now} addUri={addUri} quick={quick} limit={layout.limit} />
       )}
     </FlexWidget>
   );

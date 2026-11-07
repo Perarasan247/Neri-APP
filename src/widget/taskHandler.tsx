@@ -177,6 +177,57 @@ function wantsToday(data: Record<string, unknown>, view: WidgetSnapshot | null):
   return Boolean(str(data.date)) && str(data.date) <= day;
 }
 
+/** What the editor sheet asked for, turned into queued actions. Returns a toast message, or null for none. */
+async function applyEdit(data: Record<string, unknown>): Promise<string | null> {
+  const view = await currentView();
+  if (!view || view.signedOut) return 'Sign in to Neri to edit from the widget';
+  const id = str(data.id);
+  const op = str(data.op);
+
+  if (data.kind === 'task') {
+    const task = view.today.find((t) => t.id === id) ?? view.inbox.find((t) => t.id === id);
+    if (!task) return 'That task is no longer here';
+    if (op === 'delete') {
+      await enqueue({ kind: 'todo_delete', todoId: id });
+      return 'Task deleted';
+    }
+    const title = str(data.title).slice(0, 500);
+    const day = now(view);
+    const choice = str(data.dateChoice);
+    const date =
+      choice === 'today' ? day : choice === 'tomorrow' ? addDays(day, 1) : choice === 'none' ? null : undefined;
+    const patch: { title?: string; date?: string | null } = {};
+    if (title && title !== task.title) patch.title = title;
+    if (date !== undefined && date !== task.date) patch.date = date;
+    if (patch.title !== undefined || patch.date !== undefined) await enqueue({ kind: 'todo_update', todoId: id, ...patch });
+    const done = str(data.done);
+    if (done && (done === '1') !== task.done) await enqueue({ kind: 'todo_toggle', todoId: id, done: done === '1' });
+    return null;
+  }
+
+  const habit = view.habits.find((h) => h.id === id);
+  if (!habit) return 'That habit is no longer here';
+  if (op === 'delete' || op === 'archive') {
+    await enqueue({ kind: 'habit_delete', habitId: id, keepData: op === 'archive' });
+    return op === 'archive' ? 'Habit archived' : 'Habit deleted';
+  }
+  // Logging needs today's row: never write onto yesterday's (offline after midnight)
+  if (isStale(view)) return 'Couldn’t refresh today’s habits. Try again when online';
+
+  const count = Math.round(Number(data.count));
+  const value = Number(data.value);
+  const done = str(data.done);
+  if ((habit.type === 'build_count' || habit.type === 'avoid_count') && Number.isFinite(count) && count >= 0 && count !== habit.count) {
+    await enqueue({ kind: 'habit_inc', habitId: id, date: view.date, delta: count - habit.count, count: Math.min(count, 9999) });
+  }
+  if (Number.isFinite(value) && value > 0) {
+    await enqueue({ kind: 'habit_value', habitId: id, date: view.date, value, clientId: newClientId() });
+  } else if (habit.type === 'build_yesno' && done && (done === '1') !== habit.done) {
+    await enqueue({ kind: 'habit_set', habitId: id, date: view.date, done: done === '1' });
+  }
+  return null;
+}
+
 async function handleTap(props: WidgetTaskHandlerProps) {
   const { widgetId } = props.widgetInfo;
   const data = props.clickActionData ?? {};
@@ -197,7 +248,7 @@ async function handleTap(props: WidgetTaskHandlerProps) {
     case ACTIONS.habit: {
       const view = await currentView();
       const habit = view?.habits.find((h) => h.id === data.id);
-      // Habits needing the full UI open the app from the widget itself (see HabitRow)
+      // Habits needing more than a tap open the editor sheet from the widget itself (see HabitRow)
       if (!view || !habit || habit.opensApp || (habit.target && habit.done)) return;
       // Still showing yesterday (offline after midnight): a tap would log the wrong day
       if (isStale(view)) {
@@ -239,6 +290,13 @@ async function handleTap(props: WidgetTaskHandlerProps) {
           ? { ...state, page: 'habits' }
           : { page: 'tasks', taskView: wantsToday(data, view) ? 'today' : 'inbox' };
       await Promise.all([writeViewState(widgetId, next), draw(props, next)]);
+      await syncSoon();
+      return;
+    }
+    case ACTIONS.edit: {
+      const message = await applyEdit(data);
+      if (message) notify(message);
+      await draw(props);
       await syncSoon();
       return;
     }

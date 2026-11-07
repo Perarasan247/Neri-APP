@@ -26,19 +26,26 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * Quick-add popup for the home-screen widget's "+" button. It opens as a bottom
- * sheet over the home screen, in its own task, so the app never comes forward.
+ * Bottom sheet for the home-screen widget, opened over the home screen in its
+ * own task so the app never comes forward. Two modes:
  *
- * It only collects what the user types. On "Add" it hands the result to the
- * widget's headless JS task (the same path as a widget tap, action QUICK_ADD),
- * which queues it, redraws the widget straight away and syncs to the server
+ * - add  (the widget's "+"): type a new task or habit.
+ * - edit (tapping a row): rename / re-date / complete / delete a task, or update a habit's
+ *   count, slips or amount for today, mark it done, archive or delete it.
+ *
+ * It only collects input. On Add / Save / Delete it hands the result to the widget's
+ * headless JS task (the same path as a widget tap: action QUICK_ADD or ITEM_EDIT), which
+ * queues it, redraws the widget straight away and syncs to the server
  * (see src/widget/taskHandler.tsx). Then it closes.
  *
- * Opened by neri-widget://add?kind=task|habit&widget=<id>&today=&tomorrow=&date=today|none&accent=&accentDark=
+ * neri-widget://add?kind=task|habit&widget=<id>&today=&tomorrow=&date=today|none&accent=&accentDark=
+ * neri-widget://edit?kind=task&id=&title=&date=&done=0|1&widget=&today=&tomorrow=&accent=&accentDark=
+ * neri-widget://edit?kind=habit&id=&title=&htype=yesno|count|avoid|metric&done=&count=&target=&label=&unit=&total=&streak=&...
  */
 class QuickAddActivity : Activity() {
     private lateinit var input: EditText
@@ -57,6 +64,27 @@ class QuickAddActivity : Activity() {
     private var target = 2
     private var closing = false
 
+    // Edit mode
+    private var editing = false
+    private var itemId = ""
+    private var itemTitle = ""
+    private var itemDate = "" // task's current day, "" when undated
+    private var htype = "yesno" // habit: yesno | count | avoid | metric
+    private var done = false
+    private var startDone = false
+    private var count = 0
+    private var startCount = 0
+    private var habitTarget = 0
+    private var metricLabel = ""
+    private var metricUnit = ""
+    private var metricTotal = ""
+    private var streakText = ""
+    private var armed: String? = null // "delete" | "archive" once tapped, awaiting the confirming tap
+    private var valueInput: EditText? = null
+    private var doneToggle: TextView? = null
+    private var countLabel: TextView? = null
+    private val armable = mutableListOf<Triple<TextView, String, String>>() // view, op, label
+
     private var dark = false
     private var accent = Color.parseColor("#635bff")
     private val bg get() = if (dark) Color.parseColor("#17171d") else Color.WHITE
@@ -64,6 +92,8 @@ class QuickAddActivity : Activity() {
     private val muted get() = if (dark) Color.parseColor("#9696a6") else Color.parseColor("#6a6a7a")
     private val subtle get() = if (dark) Color.parseColor("#6b6b7b") else Color.parseColor("#93939f")
     private val chip get() = if (dark) Color.parseColor("#23232b") else Color.parseColor("#f1f1f4")
+    private val danger get() = if (dark) Color.parseColor("#ff6b81") else Color.parseColor("#d02848")
+    private val success get() = if (dark) Color.parseColor("#3dd598") else Color.parseColor("#0a7d57")
     private val onAccent get() = if (luminance(accent) > 0.6) Color.parseColor("#121218") else Color.WHITE
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,15 +101,33 @@ class QuickAddActivity : Activity() {
         readIntent(intent)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.setDecorFitsSystemWindows(false)
+        // Adding starts typing straight away; editing is mostly taps, so the keyboard waits until asked for
         window.setSoftInputMode(
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+            (if (editing) WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN else WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE) or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
         )
-        setContentView(buildContent())
+        setContentView(if (editing) buildEditContent() else buildContent())
         animateIn()
     }
 
     private fun readIntent(intent: Intent) {
         val uri: Uri? = intent.data
+        editing = uri?.host == "edit"
+        if (editing) {
+            itemId = uri?.getQueryParameter("id").orEmpty()
+            itemTitle = uri?.getQueryParameter("title").orEmpty()
+            itemDate = uri?.getQueryParameter("date").orEmpty()
+            htype = uri?.getQueryParameter("htype") ?: "yesno"
+            done = uri?.getQueryParameter("done") == "1"
+            startDone = done
+            count = uri?.getQueryParameter("count")?.toDoubleOrNull()?.toInt() ?: 0
+            startCount = count
+            habitTarget = uri?.getQueryParameter("target")?.toDoubleOrNull()?.toInt() ?: 0
+            metricLabel = uri?.getQueryParameter("label").orEmpty()
+            metricUnit = uri?.getQueryParameter("unit").orEmpty()
+            metricTotal = uri?.getQueryParameter("total").orEmpty()
+            streakText = uri?.getQueryParameter("streak").orEmpty()
+        }
         kind = if (uri?.getQueryParameter("kind") == "habit") "habit" else "task"
         widgetId = uri?.getQueryParameter("widget")?.toIntOrNull() ?: 0
         today = uri?.getQueryParameter("today").orEmpty()
@@ -96,7 +144,8 @@ class QuickAddActivity : Activity() {
 
     /* ---------- Layout ---------- */
 
-    private fun buildContent(): View {
+    /** Scrim + bottom sheet, shared by both modes. On tablets / landscape the sheet keeps a readable width. */
+    private fun buildShell(): FrameLayout {
         val root = FrameLayout(this)
         scrim = View(this).apply {
             setBackgroundColor(Color.argb(if (dark) 150 else 110, 0, 0, 0))
@@ -115,7 +164,9 @@ class QuickAddActivity : Activity() {
             }
             setPadding(dp(20), dp(10), dp(20), dp(16))
         }
-        root.addView(sheet, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        val screen = resources.displayMetrics.widthPixels
+        val width = if (screen > dp(600)) dp(560) else MATCH
+        root.addView(sheet, FrameLayout.LayoutParams(width, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
 
         // Grab handle
         sheet.addView(
@@ -125,6 +176,11 @@ class QuickAddActivity : Activity() {
                 bottomMargin = dp(14)
             },
         )
+        return root
+    }
+
+    private fun buildContent(): View {
+        val root = buildShell()
 
         sheet.addView(text(if (kind == "habit") "New habit" else "New task", 18f, fg, bold = true))
         subtitle = text("", 13f, muted).also {
@@ -157,8 +213,7 @@ class QuickAddActivity : Activity() {
         }
         sheet.addView(input, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
 
-        val chipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        sheet.addView(chipRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        val chipRow = chipStrip()
 
         var stepper: View? = null
         if (kind == "habit") {
@@ -222,18 +277,37 @@ class QuickAddActivity : Activity() {
         refresh()
     }
 
-    /** Re-style chips, stepper, subtitle and the Add button from the current state. */
-    private fun refresh() {
-        val selected = if (kind == "habit") (if (counted) "count" else "yesno") else date
+    /** Re-style a row of choice chips so `selected` stands out. */
+    private fun styleChips(selected: String) {
         for ((view, value) in chips) {
             val on = value == selected
             view.setTextColor(if (on) accent else muted)
             view.background = GradientDrawable().apply {
                 cornerRadius = dp(16).toFloat()
-                setColor(if (on) Color.argb(if (dark) 60 else 28, Color.red(accent), Color.green(accent), Color.blue(accent)) else chip)
+                setColor(if (on) tint(accent) else chip)
                 setStroke(dp(1), if (on) accent else chip)
             }
         }
+    }
+
+    private fun tint(c: Int) = Color.argb(if (dark) 60 else 28, Color.red(c), Color.green(c), Color.blue(c))
+
+    /** A horizontally scrolling row for chips, so long labels never squash on narrow phones. */
+    private fun chipStrip(): LinearLayout {
+        val scroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        scroller.addView(row)
+        sheet.addView(scroller, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        return row
+    }
+
+    /** Re-style chips, stepper, subtitle and the Add button from the current state. */
+    private fun refresh() {
+        if (editing) return refreshEdit()
+        styleChips(if (kind == "habit") (if (counted) "count" else "yesno") else date)
         stepper?.visibility = if (counted) View.VISIBLE else View.GONE
         if (::targetLabel.isInitialized) targetLabel.text = target.toString()
 
@@ -249,6 +323,282 @@ class QuickAddActivity : Activity() {
         addButton.alpha = if (ready) 1f else 0.4f
         addButton.isEnabled = ready
     }
+
+    /* ---------- Edit mode ---------- */
+
+    private fun buildEditContent(): View {
+        val root = buildShell()
+        val isTask = kind == "task"
+
+        sheet.addView(
+            text(if (isTask) "Edit task" else itemTitle, 18f, fg, bold = true).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+        )
+        subtitle = text("", 13f, muted).also {
+            sheet.addView(it, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(2) })
+        }
+
+        if (isTask) {
+            input = textBox(itemTitle, "Task name", 300).apply {
+                setOnEditorActionListener { _, action, _ ->
+                    if (action == EditorInfo.IME_ACTION_DONE) {
+                        save()
+                        true
+                    } else false
+                }
+            }
+            sheet.addView(input, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
+            val row = chipStrip()
+            date = initialDateChoice()
+            if (date == "keep") row.addView(chip(shortDate(itemDate), "keep") { date = "keep" })
+            if (today.isNotEmpty()) row.addView(chip("Today", "today") { date = "today" })
+            if (tomorrow.isNotEmpty()) row.addView(chip("Tomorrow", "tomorrow") { date = "tomorrow" })
+            row.addView(chip("No date", "none") { date = "none" })
+            doneToggle = togglePill().also {
+                sheet.addView(it, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
+            }
+        } else {
+            // Never shown: keeps the keyboard helpers (hideKeyboard) working when there is nothing to type
+            input = EditText(this).apply { visibility = View.GONE }
+            sheet.addView(input)
+            when (htype) {
+                "count" -> addStepper("Today", habitTarget)
+                "avoid" -> addStepper("Slips today", 0)
+                "metric" -> {
+                    val what = metricLabel.ifEmpty { "amount" }.lowercase()
+                    val unit = if (metricUnit.isNotEmpty()) " ($metricUnit)" else ""
+                    val box = textBox("", "Add $what$unit", 12).apply {
+                        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        setOnEditorActionListener { _, action, _ ->
+                            if (action == EditorInfo.IME_ACTION_DONE) {
+                                save()
+                                true
+                            } else false
+                        }
+                    }
+                    valueInput = box
+                    sheet.addView(box, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
+                    doneToggle = togglePill().also {
+                        sheet.addView(it, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
+                    }
+                }
+                else -> doneToggle = togglePill().also {
+                    sheet.addView(it, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
+                }
+            }
+        }
+
+        // Destructive actions: each needs a second tap, so a stray touch can't delete anything
+        val dangerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        sheet.addView(dangerRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        if (!isTask) dangerRow.addView(armButton("Archive", "archive"))
+        dangerRow.addView(armButton("Delete", "delete"))
+
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        sheet.addView(footer, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        footer.addView(
+            text("Open in Neri", 14f, muted, bold = true).apply {
+                setPadding(dp(4), dp(10), dp(8), dp(10))
+                setOnClickListener { openInApp() }
+            },
+        )
+        footer.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        footer.addView(
+            text("Cancel", 15f, muted, bold = true).apply {
+                setPadding(dp(12), dp(11), dp(12), dp(11))
+                setOnClickListener { dismiss() }
+            },
+        )
+        addButton = text("Save", 15f, onAccent, bold = true).apply {
+            background = rounded(accent, 22)
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(11), dp(24), dp(11))
+            setOnClickListener { save() }
+        }
+        footer.addView(addButton)
+
+        applyInsets(root)
+        refresh()
+        return root
+    }
+
+    private fun textBox(value: String, hintText: String, max: Int) = EditText(this).apply {
+        filters = arrayOf(InputFilter.LengthFilter(max))
+        setText(value)
+        setSelection(text.length)
+        hint = hintText
+        setHintTextColor(subtle)
+        setTextColor(fg)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        background = rounded(chip, 14)
+        setPadding(dp(14), dp(12), dp(14), dp(12))
+        isSingleLine = true
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        imeOptions = EditorInfo.IME_ACTION_DONE
+        highlightColor = tint(accent)
+        addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) = refresh()
+        })
+    }
+
+    /** Full-width pill that flips done / not done. */
+    private fun togglePill() = text("", 15f, fg, bold = true).apply {
+        gravity = Gravity.CENTER
+        setPadding(dp(16), dp(13), dp(16), dp(13))
+        setOnClickListener {
+            done = !done
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            refresh()
+        }
+    }
+
+    /** "Label   −  N / target  +" for count and avoid habits. */
+    private fun addStepper(label: String, of: Int) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(chip, 14)
+            setPadding(dp(14), dp(8), dp(8), dp(8))
+        }
+        row.addView(text(label, 15f, fg), LinearLayout.LayoutParams(0, WRAP, 1f))
+        row.addView(roundButton("−") { setCount(count - 1) }.apply { background = rounded(bg, 18) })
+        val number = text("", 17f, fg, bold = true).apply { gravity = Gravity.CENTER }
+        countLabel = number
+        row.addView(number, LinearLayout.LayoutParams(dp(if (of > 0) 76 else 56), WRAP))
+        row.addView(roundButton("+") { setCount(count + 1) }.apply { background = rounded(bg, 18) })
+        sheet.addView(row, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(14) })
+    }
+
+    private fun setCount(n: Int) {
+        count = n.coerceIn(0, 9999)
+        countLabel?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        refresh()
+    }
+
+    private fun armButton(label: String, op: String) = text(label, 14f, danger, bold = true).apply {
+        setPadding(dp(14), dp(9), dp(14), dp(9))
+        layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(8) }
+        setOnClickListener {
+            if (closing) return@setOnClickListener
+            if (armed == op) {
+                send(
+                    "ITEM_EDIT",
+                    Bundle().apply {
+                        putString("kind", kind)
+                        putString("id", itemId)
+                        putString("op", op)
+                    },
+                )
+            } else {
+                armed = op
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                refresh()
+            }
+        }
+        armable.add(Triple(this, op, label))
+    }
+
+    private fun refreshEdit() {
+        if (kind == "task") styleChips(date)
+        for ((view, op, label) in armable) {
+            val on = armed == op
+            view.text = if (on) "Tap again to ${label.lowercase()}" else label
+            view.setTextColor(if (on) onAccentFor(danger) else danger)
+            view.background = rounded(if (on) danger else tint(danger), 18)
+        }
+        doneToggle?.let {
+            it.text = when {
+                kind == "task" -> if (done) "✓  Completed · tap to reopen" else "Mark complete"
+                else -> if (done) "✓  Done today · tap to undo" else "Mark done today"
+            }
+            it.setTextColor(if (done) onAccentFor(success) else fg)
+            it.background = rounded(if (done) success else chip, 14)
+        }
+        countLabel?.text = if (htype == "count" && habitTarget > 0) "$count / $habitTarget" else count.toString()
+
+        subtitle.text = if (kind == "task") {
+            when (date) {
+                "today" -> "Due today"
+                "tomorrow" -> "Due tomorrow"
+                "none" -> "No date · in your inbox"
+                else -> "Due ${shortDate(itemDate)}"
+            }
+        } else {
+            val unit = if (metricUnit.isNotEmpty()) " $metricUnit" else ""
+            val what = when (htype) {
+                "count" -> "$habitTarget times a day"
+                "avoid" -> if (count == 0) "Clean day so far" else "$count slip${if (count == 1) "" else "s"} today"
+                "metric" -> if (metricTotal.isNotEmpty() && metricTotal != "0") "Logged today: $metricTotal$unit" else "Nothing logged today"
+                else -> "Every day"
+            }
+            if (streakText.isNotEmpty()) "$what  ·  🔥 $streakText" else what
+        }
+
+        val ready = kind != "task" || input.text.toString().isNotBlank()
+        addButton.alpha = if (ready) 1f else 0.4f
+        addButton.isEnabled = ready
+    }
+
+    private fun save() {
+        if (closing) return
+        if (kind == "task" && input.text.toString().isBlank()) return
+        val value = valueInput?.text?.toString()?.trim()?.toDoubleOrNull()
+        val unchanged = if (kind == "task") {
+            input.text.toString().trim() == itemTitle && date == initialDateChoice() && done == startDone
+        } else {
+            count == startCount && done == startDone && (value == null || value <= 0)
+        }
+        // Nothing changed: close without waking the JS task or redrawing the widget
+        if (unchanged) return dismiss()
+        addButton.performHapticFeedback(HapticFeedbackConstants.CONFIRM.takeIf { Build.VERSION.SDK_INT >= 30 } ?: HapticFeedbackConstants.VIRTUAL_KEY)
+        send(
+            "ITEM_EDIT",
+            Bundle().apply {
+                putString("kind", kind)
+                putString("id", itemId)
+                putString("op", "save")
+                putString("done", if (done) "1" else "0")
+                if (kind == "task") {
+                    putString("title", input.text.toString().trim())
+                    putString("dateChoice", date)
+                } else {
+                    putString("count", count.toString())
+                    if (value != null && value > 0) putString("value", value.toString())
+                }
+            },
+        )
+    }
+
+    private fun initialDateChoice() = when {
+        itemDate.isEmpty() -> "none"
+        itemDate == today -> "today"
+        itemDate == tomorrow -> "tomorrow"
+        else -> "keep"
+    }
+
+    /** "2026-12-08" -> "8 Dec" */
+    private fun shortDate(iso: String): String {
+        val parts = iso.split("-")
+        if (parts.size != 3) return iso
+        val months = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        val m = parts[1].toIntOrNull()?.takeIf { it in 1..12 } ?: return iso
+        return "${parts[2].trimStart('0')} ${months[m - 1]}"
+    }
+
+    private fun openInApp() = launchApp(if (kind == "task") "neri://task/$itemId" else "neri://habit/$itemId")
+
+    private fun onAccentFor(c: Int) = if (luminance(c) > 0.6) Color.parseColor("#121218") else Color.WHITE
+
 
     /* ---------- Actions ---------- */
 
@@ -268,16 +618,20 @@ class QuickAddActivity : Activity() {
                 putString("dateChoice", date)
             }
         }
-        // Same broadcast a widget tap sends; the provider starts the headless JS task with it.
-        // No sizing extras, so the library's tap calibration leaves it alone.
+        // No "added" toast here: the JS side shows it once it has really saved the item, or says why it couldn't
+        // (signed out, nothing typed). Confirming before that would claim success for something that was dropped.
+        send("QUICK_ADD", data)
+    }
+
+    /** Hand the result to the widget's headless JS task (the provider starts it), then close. */
+    private fun send(action: String, data: Bundle) {
+        // Same broadcast a widget tap sends. No sizing extras, so the library's tap calibration leaves it alone.
         val broadcast = Intent("$packageName.WIDGET_CLICK").apply {
             setClass(this@QuickAddActivity, Neri::class.java)
             putExtra("widgetId", widgetId)
-            putExtra("clickAction", "QUICK_ADD")
+            putExtra("clickAction", action)
             putExtra("clickActionData", data)
         }
-        // No "added" toast here: the JS side shows it once it has really saved the item, or says why it couldn't
-        // (signed out, nothing typed). Confirming before that would claim success for something that was dropped.
         sendBroadcast(broadcast)
         dismiss()
     }
@@ -289,6 +643,10 @@ class QuickAddActivity : Activity() {
             date == "tomorrow" -> "neri://task/new?date=$tomorrow"
             else -> "neri://task/new"
         }
+        launchApp(uri)
+    }
+
+    private fun launchApp(uri: String) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
@@ -321,7 +679,7 @@ class QuickAddActivity : Activity() {
             sheet.animate().translationY(0f).setDuration(220)
                 .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
             scrim.animate().alpha(1f).setDuration(220).start()
-            showKeyboard()
+            if (!editing) showKeyboard()
         }
     }
 

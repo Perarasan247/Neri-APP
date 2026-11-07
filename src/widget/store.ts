@@ -30,8 +30,15 @@ export interface WidgetHabit {
   target: number | null;
   streak: number;
   streakUnit: StreakUnit;
-  /** Habits the widget can't complete in one tap (value logging, "avoid" habits) open the app instead. */
+  /**
+   * Habits a single tap can't complete (value logging, "avoid" habits): their circle opens the
+   * widget's editor sheet instead of ticking (it never opens the app).
+   */
   opensApp: boolean;
+  /** Value-logging habits: what is measured ("Pages") and today's total so far. */
+  metricLabel?: string | null;
+  metricUnit?: string | null;
+  metricTotal?: number | null;
 }
 
 export interface WidgetTask {
@@ -71,7 +78,14 @@ export type WidgetActionInput =
   /** From the widget's quick-add popup. `clientId` becomes the server's row id. */
   | { kind: 'todo_create'; clientId: string; title: string; date: string | null }
   /** `tempId` is swapped for the server's id once the habit is created. */
-  | { kind: 'habit_create'; tempId: string; name: string; date: string; target: number | null; color: string; /** A create was already sent once (outcome unknown): look for the habit before creating it again. */ attempted?: boolean };
+  | { kind: 'habit_create'; tempId: string; name: string; date: string; target: number | null; color: string; /** A create was already sent once (outcome unknown): look for the habit before creating it again. */ attempted?: boolean }
+  /** A measurement added from the editor sheet. `clientId` makes a resend a no-op on the server. */
+  | { kind: 'habit_value'; habitId: string; date: string; value: number; clientId: string }
+  /** `keepData` archives (history kept); false erases the habit and its logs. */
+  | { kind: 'habit_delete'; habitId: string; keepData: boolean }
+  /** Rename and/or move a task. `date` is only sent when present (null clears it). */
+  | { kind: 'todo_update'; todoId: string; title?: string; date?: string | null }
+  | { kind: 'todo_delete'; todoId: string };
 
 /** `owner` is who made the tap; actions of another account are kept but never sent or shown. */
 export type WidgetAction = { id: string; at: number; owner?: string | null } & WidgetActionInput;
@@ -97,9 +111,21 @@ export function serial<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/**
+ * In-memory copy of what this JS context has read or written. The app and the widget's headless
+ * task share one JS context per process, and every write goes through writeJSON(), so the copy can't
+ * go stale; it saves several disk round trips on every tap before the widget can redraw.
+ * Values are kept as JSON text so callers can never mutate the cached object.
+ */
+const memory = new Map<string, string | null>();
+
 async function readJSON<T>(key: string): Promise<T | null> {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    let raw = memory.get(key);
+    if (raw === undefined) {
+      raw = await AsyncStorage.getItem(key);
+      memory.set(key, raw);
+    }
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -107,10 +133,15 @@ async function readJSON<T>(key: string): Promise<T | null> {
 }
 
 async function writeJSON(key: string, value: unknown): Promise<void> {
+  const raw = JSON.stringify(value);
+  memory.set(key, raw);
   try {
-    await AsyncStorage.setItem(key, JSON.stringify(value));
+    await AsyncStorage.setItem(key, raw);
   } catch {}
 }
+
+/** Forget the in-memory copy (tests, or after storage was changed outside this module). */
+export const resetStoreCache = () => memory.clear();
 
 /* ---------- Snapshot ---------- */
 
@@ -140,6 +171,7 @@ export async function readViewState(widgetId: number): Promise<WidgetViewState> 
 export const writeViewState = (widgetId: number, s: WidgetViewState) => writeJSON(STATE_KEY(widgetId), s);
 
 export async function clearViewState(widgetId: number): Promise<void> {
+  memory.delete(STATE_KEY(widgetId));
   try {
     await AsyncStorage.removeItem(STATE_KEY(widgetId));
   } catch {}
@@ -167,7 +199,8 @@ export function applyAction(s: WidgetSnapshot, a: WidgetAction): WidgetSnapshot 
         habits: s.habits.map((h) => {
           if (h.id !== a.habitId) return h;
           const count = Math.max(0, a.count ?? h.count + a.delta);
-          const done = h.target ? count >= h.target : h.done;
+          // Avoid habits count slips: the day is clean (done) only at zero
+          const done = h.type === 'avoid_count' ? count === 0 : h.target ? count >= h.target : h.done;
           const streak = done === h.done ? h.streak : Math.max(0, h.streak + (done ? 1 : -1));
           return { ...h, count, done, streak };
         }),
@@ -202,13 +235,67 @@ export function applyAction(s: WidgetSnapshot, a: WidgetAction): WidgetSnapshot 
       };
       return { ...s, habits: [...s.habits, habit] };
     }
+    case 'habit_value':
+      if (a.date !== s.date) return s;
+      return {
+        ...s,
+        habits: s.habits.map((h) =>
+          h.id !== a.habitId
+            ? h
+            : {
+                ...h,
+                done: true,
+                count: Math.max(1, h.count),
+                metricTotal: (h.metricTotal ?? 0) + a.value,
+                streak: h.done ? h.streak : h.streak + 1,
+              },
+        ),
+      };
+    case 'habit_delete':
+      return { ...s, habits: s.habits.filter((h) => h.id !== a.habitId) };
+    case 'todo_delete':
+      return { ...s, today: s.today.filter((t) => t.id !== a.todoId), inbox: s.inbox.filter((t) => t.id !== a.todoId) };
+    case 'todo_update':
+      return updateTask(s, a);
   }
+}
+
+/** Rename / re-date a task on both lists, moving it onto or off Today and re-sorting the inbox by day. */
+function updateTask(s: WidgetSnapshot, a: Extract<WidgetActionInput, { kind: 'todo_update' }>): WidgetSnapshot {
+  const existing = s.inbox.find((t) => t.id === a.todoId) ?? s.today.find((t) => t.id === a.todoId);
+  if (!existing) return s;
+  const task: WidgetTask = {
+    ...existing,
+    ...(a.title !== undefined ? { title: a.title } : {}),
+    ...(a.date !== undefined ? { date: a.date } : {}),
+  };
+  if (a.date === undefined) {
+    const swap = (list: WidgetTask[]) => list.map((t) => (t.id === task.id ? task : t));
+    return { ...s, today: swap(s.today), inbox: swap(s.inbox) };
+  }
+  const onToday = task.date !== null && task.date <= s.date;
+  const wasToday = s.today.some((t) => t.id === task.id);
+  const today = onToday
+    ? wasToday
+      ? s.today.map((t) => (t.id === task.id ? task : t))
+      : [...s.today, task]
+    : s.today.filter((t) => t.id !== task.id);
+  let inbox = s.inbox.filter((t) => t.id !== task.id);
+  if (!task.done) {
+    const at = inbox.findIndex((t) => (task.date === null ? false : t.date === null || t.date > task.date));
+    inbox = at < 0 ? [...inbox, task] : [...inbox.slice(0, at), task, ...inbox.slice(at)];
+  }
+  return { ...s, today, inbox };
 }
 
 /** Point queued taps on a just-created habit at its real id. */
 export function renameHabit(q: WidgetAction[], from: string, to: string): WidgetAction[] {
   return q.map((a) => {
-    if ((a.kind === 'habit_set' || a.kind === 'habit_inc') && a.habitId === from) return { ...a, habitId: to };
+    if (
+      (a.kind === 'habit_set' || a.kind === 'habit_inc' || a.kind === 'habit_value' || a.kind === 'habit_delete') &&
+      a.habitId === from
+    )
+      return { ...a, habitId: to };
     if (a.kind === 'habit_create' && a.tempId === from) return { ...a, tempId: to };
     return a;
   });
