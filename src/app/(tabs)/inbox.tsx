@@ -20,6 +20,7 @@ import {
 
 import type { Todo, TodoPriority } from '@/api/types';
 import {
+  Appear,
   ActionSheet,
   Button,
   Chip,
@@ -53,6 +54,7 @@ import { useTodos } from '@/hooks/queries';
 import { pluralize, PRIORITY_META, priorityColor, today } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
 import { space } from '@/theme/tokens';
+import { useContentFrame, useResponsive } from '@/theme/useResponsive';
 
 const VIEWS: TodoView[] = ['all', 'today', 'upcoming', 'overdue', 'completed'];
 
@@ -68,6 +70,8 @@ const EMPTY_COPY: Record<TodoView, { title: string; description: string }> = {
 export default function InboxScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const frame = useContentFrame();
+  const { gutter } = useResponsive();
   const pickers = usePickers();
   const reschedule = useReschedule();
 
@@ -236,8 +240,8 @@ export default function InboxScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.chipsScroll}
-        contentContainerStyle={styles.chips}
+        style={[styles.chipsScroll, { marginHorizontal: -gutter }]}
+        contentContainerStyle={[styles.chips, { paddingHorizontal: gutter }]}
         keyboardShouldPersistTaps="handled"
       >
         {VIEWS.map((v) => (
@@ -288,7 +292,12 @@ export default function InboxScreen() {
       <SectionList
         sections={listSections}
         keyExtractor={(t) => t.id}
-        renderItem={({ item }) => <TaskRow todo={item} hideDate={view === 'today'} />}
+        renderItem={({ item, index }) => (
+          // Only the first screenful rises in, so scrolling down never waits on an animation
+          <Appear index={index} animateIn={index < 10} layout={false}>
+            <TaskRow todo={item} hideDate={view === 'today'} />
+          </Appear>
+        )}
         renderSectionHeader={({ section }) => {
           if (section.key === 'list') {
             return (
@@ -323,7 +332,7 @@ export default function InboxScreen() {
         stickySectionHeadersEnabled={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + space.sm }]}
+        contentContainerStyle={[frame, styles.content, { paddingTop: insets.top + space.sm }]}
         refreshControl={
           <RefreshControl
             refreshing={query.isRefetching}
@@ -359,10 +368,10 @@ function Separator() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: space.lg, paddingBottom: 96 },
+  content: { paddingBottom: 96 },
   search: { marginTop: -space.sm, marginBottom: space.md },
-  chipsScroll: { marginHorizontal: -space.lg, marginBottom: space.sm },
-  chips: { paddingHorizontal: space.lg, gap: space.sm, alignItems: 'center' },
+  chipsScroll: { marginBottom: space.sm },
+  chips: { gap: space.sm, alignItems: 'center' },
   chipDivider: { width: StyleSheet.hairlineWidth, height: 20, marginHorizontal: space.xs },
   sectionHeader: { marginTop: space.md },
 });

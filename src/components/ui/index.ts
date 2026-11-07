@@ -23,3 +23,4 @@ export { Sheet, ActionSheet, useDisclosure, ToastProvider, useToast, type MenuOp
 export { DatePickerSheet, TimePickerSheet } from './pickers';
 export { DialogProvider, useDialog, type DialogButton, type DialogOptions, type ConfirmOptions } from './dialog';
 export { HabitIcon, HabitTile, HABIT_ICONS, withAlpha } from './HabitIcon';
+export { PressableScale, Appear, enterAt, reflow, leave, EASE, DURATION, PRESS_SPRING, POP_SPRING } from './motion';

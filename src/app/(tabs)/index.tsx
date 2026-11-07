@@ -33,6 +33,7 @@ import { ValueSheet } from '@/components/today/ValueSheet';
 import {
   ActionSheet,
   AddCta,
+  Appear,
   Button,
   EmptyState,
   ErrorState,
@@ -447,9 +448,10 @@ export default function TodayScreen() {
                 title="Habits"
                 count={data.total_due_today > 0 ? `${data.total_done_today}/${data.total_due_today}` : undefined}
               />
-              {habitItems.map((item) => (
+              {habitItems.map((item, i) => (
+                // Rises in on first load; glides to its new place when completing it re-sorts the list
+                <Appear key={item.habit.id} index={i}>
                 <HabitRow
-                  key={item.habit.id}
                   item={item}
                   onToggle={() => handleToggle(item)}
                   onIncrement={(d) => handleIncrement(item, d)}
@@ -460,6 +462,7 @@ export default function TodayScreen() {
                     setMenu(item);
                   }}
                 />
+                </Appear>
               ))}
               <AddCta label="Add a habit" onPress={() => router.push('/habit/new')} style={styles.cta} />
             </View>
@@ -473,8 +476,10 @@ export default function TodayScreen() {
                   tone="danger"
                   action={{ label: 'Reschedule', onPress: reschedule }}
                 />
-                {openOverdue.map((t) => (
-                  <TaskRow key={t.id} todo={t} />
+                {openOverdue.map((t, i) => (
+                  <Appear key={t.id} index={habitItems.length + i}>
+                    <TaskRow todo={t} />
+                  </Appear>
                 ))}
               </View>
             ) : null}
@@ -498,13 +503,19 @@ export default function TodayScreen() {
                 />
               ) : (
                 <>
-                  {pendingTodos.map((t) => (
-                    <TaskRow key={t.id} todo={t} hideDate />
-                  ))}
-                  {doneTodos.map((t) => (
-                    <View key={t.id} style={{ opacity: 0.6 }}>
+                  {pendingTodos.map((t, i) => (
+                    <Appear key={t.id} index={habitItems.length + openOverdue.length + i}>
                       <TaskRow todo={t} hideDate />
-                    </View>
+                    </Appear>
+                  ))}
+                  {doneTodos.map((t, i) => (
+                    <Appear
+                      key={t.id}
+                      index={habitItems.length + openOverdue.length + pendingTodos.length + i}
+                      style={{ opacity: 0.6 }}
+                    >
+                      <TaskRow todo={t} hideDate />
+                    </Appear>
                   ))}
                   <AddCta label="Add a task" onPress={openNewTask} style={styles.cta} />
                 </>

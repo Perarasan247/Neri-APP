@@ -7,6 +7,7 @@ import { Text } from '@/components/ui';
 import { haptic } from '@/lib/haptics';
 import { parseISODate, today } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useResponsive } from '@/theme/useResponsive';
 
 /** Today tab icon shows the current day number, like a desk calendar. */
 function TodayIcon({ color, focused }: { color: string; focused: boolean }) {
@@ -22,22 +23,37 @@ function TodayIcon({ color, focused }: { color: string; focused: boolean }) {
 }
 
 export default function TabsLayout() {
-  const { colors, textScale } = useTheme();
+  const { colors, textScale, reduceMotion } = useTheme();
+  const { sizeClass, isCompact, isTablet } = useResponsive();
   // Labels follow the in-app text size too, but stay small enough that five tabs always fit
-  const labelScale = textScale === null ? 1 : Math.min(textScale, 1.3);
+  const labelScale = (textScale === null ? 1 : Math.min(textScale, 1.3)) * (isCompact ? 0.95 : isTablet ? 1.2 : 1);
+  // Wide screens (large tablets, landscape foldables): a side rail keeps the content area tall
+  const rail = sizeClass === 'wide';
   return (
     <Tabs
       screenListeners={{ tabPress: () => haptic.tap() }}
       screenOptions={{
         headerShown: false,
+        // Cross-fade between tabs instead of a hard cut
+        animation: reduceMotion ? 'none' : 'fade',
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.fgSubtle,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.line,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          paddingTop: 4,
-        },
+        tabBarPosition: rail ? 'left' : 'bottom',
+        tabBarVariant: rail ? 'material' : 'uikit',
+        tabBarStyle: rail
+          ? {
+              backgroundColor: colors.surface,
+              borderRightColor: colors.line,
+              borderRightWidth: StyleSheet.hairlineWidth,
+            }
+          : {
+              backgroundColor: colors.surface,
+              borderTopColor: colors.line,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              paddingTop: 4,
+            },
+        tabBarActiveBackgroundColor: rail ? colors.accentSoft : undefined,
+        tabBarItemStyle: rail ? { borderRadius: 14, marginHorizontal: 6, marginVertical: 2 } : undefined,
         tabBarAllowFontScaling: textScale === null,
         tabBarLabelStyle: { fontSize: 10.5 * labelScale, fontWeight: '600', letterSpacing: 0.1 },
         sceneStyle: { backgroundColor: colors.canvas },

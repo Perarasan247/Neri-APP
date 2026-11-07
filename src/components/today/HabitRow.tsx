@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Flame, MessageSquare, Minus, MoreHorizontal, NotebookPen, Plus } from 'lucide-react-native';
 
 import type { TodayItem } from '@/api/types';
-import { Badge, Checkbox, HabitTile, IconButton, ProgressRing, Text } from '@/components/ui';
+import { Badge, Checkbox, HabitTile, IconButton, PressableScale, ProgressRing, Text } from '@/components/ui';
 import { describeSchedule } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useResponsive } from '@/theme/useResponsive';
 import { radius, space } from '@/theme/tokens';
 
 interface HabitRowProps {
@@ -29,6 +30,8 @@ interface HabitRowProps {
  */
 export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, onMenu, onLog, onSetSlips }: HabitRowProps) {
   const { colors } = useTheme();
+  // Small phones: tighter gaps and a smaller tile so the name keeps room next to the stepper
+  const { isCompact } = useResponsive();
   const { habit, status, count, current_streak, is_skipped, skip_reason, weekly_progress, note } = item;
   const target = item.daily_target || 0;
   const isDone = status === 'done';
@@ -158,7 +161,8 @@ export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, on
   }
 
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.985}
       onPress={habit.type === 'build_yesno' && !is_skipped ? onToggle : onMenu}
       onLongPress={onMenu}
       delayLongPress={350}
@@ -167,11 +171,12 @@ export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, on
       accessibilityHint="Long press for more actions"
       style={({ pressed }) => [
         styles.row,
+        isCompact && styles.rowCompact,
         { backgroundColor: pressed ? colors.subtle : colors.surface, borderColor: colors.line },
       ]}
     >
       <View style={{ opacity: dimmed ? 0.6 : 1 }}>
-        <HabitTile icon={habit.icon} color={habit.color} size={36} />
+        <HabitTile icon={habit.icon} color={habit.color} size={isCompact ? 32 : 36} />
       </View>
 
       <View style={styles.body}>
@@ -213,7 +218,7 @@ export const HabitRow = memo(function HabitRow({ item, onToggle, onIncrement, on
       <IconButton label={`More actions for ${habit.name}`} size={28} onPress={onMenu}>
         <MoreHorizontal size={18} color={colors.fgMuted} />
       </IconButton>
-    </Pressable>
+    </PressableScale>
   );
 });
 
@@ -228,6 +233,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  rowCompact: { gap: space.sm, paddingLeft: space.sm + 2, paddingRight: space.xs },
   body: { flex: 1, minWidth: 0, gap: 3 },
   meta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 5, rowGap: 1 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },

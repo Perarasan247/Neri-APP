@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -11,14 +11,28 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Animated, {
+  interpolateColor,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+  ZoomIn,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, Plus } from 'lucide-react-native';
 
 import { AppTextInput } from './TextInput';
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
 import { elevation, font, radius, space } from '@/theme/tokens';
+import { chunk } from '@/theme/responsive';
+import { useResponsive } from '@/theme/useResponsive';
 import { withAlpha } from './HabitIcon';
 import { requestReveal } from './keyboard';
+import { DURATION, EASE, POP_SPRING, PressableScale } from './motion';
 import { Text } from './Text';
 
 /* ---------- Buttons ---------- */
@@ -58,7 +72,8 @@ export function Button({
   const h = { sm: 34, md: 44, lg: 52 }[size];
 
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.97}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       disabled={disabled || loading}
@@ -76,7 +91,6 @@ export function Button({
           borderColor: v.border,
           opacity: disabled ? 0.5 : 1,
           alignSelf: block ? 'stretch' : 'auto',
-          transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         variant === 'primary' && !disabled && { shadowColor: c.accent, ...elevation.raised, shadowOpacity: 0.28 },
         style,
@@ -87,7 +101,7 @@ export function Button({
       <Text variant={size === 'sm' ? 'small' : 'body'} weight="semibold" color={v.fg}>
         {title}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -101,7 +115,8 @@ interface IconButtonProps extends Omit<PressableProps, 'style'> {
 export function IconButton({ label, children, size = 40, style, onPress, ...props }: IconButtonProps) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.88}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={6}
@@ -117,44 +132,64 @@ export function IconButton({ label, children, size = 40, style, onPress, ...prop
       {...props}
     >
       {children}
-    </Pressable>
+    </PressableScale>
   );
 }
 
-/** Floating "+" button, bottom-right above the tab bar. */
+/** Floating "+" button, bottom-right above the tab bar; springs in on mount. */
 export function Fab({ onPress, label = 'Add' }: { onPress: () => void; label?: string }) {
   const { colors } = useTheme();
+  const { gutter, scale, width, contentMaxWidth } = useResponsive();
+  const insets = useSafeAreaInsets();
+  const size = scale(56);
+  // On tablets keep the button at the edge of the centred content column, not the far screen edge
+  const edge = contentMaxWidth && width > contentMaxWidth ? (width - contentMaxWidth) / 2 : 0;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={() => {
-        haptic.light();
-        onPress();
-      }}
-      style={({ pressed }) => [
+    <Animated.View
+      entering={ZoomIn.springify().damping(14).stiffness(220).delay(120)}
+      style={[
         styles.fab,
-        { backgroundColor: colors.accent, shadowColor: colors.accent, transform: [{ scale: pressed ? 0.94 : 1 }] },
+        {
+          width: size,
+          height: size,
+          // Clear the notch / camera cut-out in landscape
+          right: edge + gutter + insets.right,
+          bottom: space.lg,
+          shadowColor: colors.accent,
+        },
       ]}
     >
-      {/* Brand gradient (indigo to violet by default, follows a custom accent) */}
-      <Svg width={56} height={56} style={StyleSheet.absoluteFill}>
-        <Defs>
-          <LinearGradient id="fabGradient" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={colors.brandFrom} />
-            <Stop offset="1" stopColor={colors.brandTo} />
-          </LinearGradient>
-        </Defs>
-        <Rect width={56} height={56} rx={radius.xl} fill="url(#fabGradient)" />
-      </Svg>
-      <Plus size={26} color={colors.accentFg} strokeWidth={2.5} />
-    </Pressable>
+      <PressableScale
+        scaleTo={0.9}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={() => {
+          haptic.light();
+          onPress();
+        }}
+        style={[styles.fabInner, { backgroundColor: colors.accent }]}
+      >
+        {/* Brand gradient (indigo to violet by default, follows a custom accent) */}
+        <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id="fabGradient" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor={colors.brandFrom} />
+              <Stop offset="1" stopColor={colors.brandTo} />
+            </LinearGradient>
+          </Defs>
+          <Rect width={size} height={size} rx={radius.xl} fill="url(#fabGradient)" />
+        </Svg>
+        <Plus size={Math.round(size * 0.46)} color={colors.accentFg} strokeWidth={2.5} />
+      </PressableScale>
+    </Animated.View>
   );
 }
 
 /* ---------- Selection ---------- */
 
-/** Round task checkbox; ring color shows priority (Todoist-style). */
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/** Round task checkbox; ring color shows priority (Todoist-style). Fills and pops with a spring. */
 export function Checkbox({
   checked,
   onChange,
@@ -172,8 +207,31 @@ export function Checkbox({
 }) {
   const { colors } = useTheme();
   const ring = color ?? colors.fgSubtle;
+  const empty = withAlpha(ring, 0.08);
+  // Start at the current state: only a change animates, never the first render
+  const progress = useSharedValue(checked ? 1 : 0);
+  const pop = useSharedValue(1);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    progress.set(withTiming(checked ? 1 : 0, { duration: DURATION.fast, easing: EASE }));
+    if (checked) pop.set(withSequence(withTiming(0.82, { duration: 70 }), withSpring(1, POP_SPRING)));
+  }, [checked, progress, pop]);
+
+  const boxStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(progress.value, [0, 1], [empty, ring]),
+    transform: [{ scale: pop.value }],
+  }));
+  const tickStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: 0.4 + progress.value * 0.6 }],
+  }));
+
   return (
-    <Pressable
+    <AnimatedPressable
       accessibilityRole="checkbox"
       accessibilityState={{ checked, disabled }}
       accessibilityLabel={label}
@@ -184,19 +242,23 @@ export function Checkbox({
         else haptic.tap();
         onChange();
       }}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        borderWidth: 1.75,
-        borderColor: ring,
-        backgroundColor: checked ? ring : withAlpha(ring, 0.08),
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: 1.75,
+          borderColor: ring,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        boxStyle,
+      ]}
     >
-      {checked ? <Check size={size * 0.6} color="#ffffff" strokeWidth={3} /> : null}
-    </Pressable>
+      <Animated.View style={tickStyle}>
+        <Check size={size * 0.6} color="#ffffff" strokeWidth={3} />
+      </Animated.View>
+    </AnimatedPressable>
   );
 }
 
@@ -220,7 +282,8 @@ export function Chip({
   const { colors } = useTheme();
   const tint = color ?? colors.accent;
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.94}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       onPress={() => {
@@ -240,7 +303,7 @@ export function Chip({
       <Text variant="small" weight="medium" color={selected ? (color ?? colors.accentText) : colors.fgSoft}>
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -359,17 +422,25 @@ export function Field({
 
 /* ---------- Data display ---------- */
 
+/** Linear progress; grows to its value on mount and glides between values. */
 export function ProgressBar({ value, color, height = 6 }: { value: number; color?: string; height?: number }) {
   const { colors } = useTheme();
   const pct = Math.max(0, Math.min(100, value));
+  const width = useSharedValue(0);
+  useEffect(() => {
+    width.set(withTiming(pct, { duration: DURATION.page * 2, easing: EASE }));
+  }, [pct, width]);
+  const fill = useAnimatedStyle(() => ({ width: `${width.value}%` }));
   return (
     <View style={{ height, borderRadius: height / 2, backgroundColor: colors.mutedStrong, overflow: 'hidden' }}>
-      <View style={{ width: `${pct}%`, height: '100%', borderRadius: height / 2, backgroundColor: color ?? colors.accent }} />
+      <Animated.View style={[{ height: '100%', borderRadius: height / 2, backgroundColor: color ?? colors.accent }, fill]} />
     </View>
   );
 }
 
-/** Circular progress (count habits, completion summary). */
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+/** Circular progress (count habits, completion summary); sweeps to its value. */
 export function ProgressRing({
   value,
   size = 24,
@@ -389,23 +460,30 @@ export function ProgressRing({
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const pct = Math.max(0, Math.min(1, value));
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.set(withTiming(pct, { duration: DURATION.page * 2, easing: EASE }));
+  }, [pct, progress]);
+  const arc = useAnimatedProps(() => ({
+    strokeDashoffset: circ * (1 - progress.value),
+    // A zero-length round-capped stroke still draws a dot; hide it at 0
+    strokeOpacity: progress.value > 0.002 ? 1 : 0,
+  }));
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size} style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
         <Circle cx={size / 2} cy={size / 2} r={r} stroke={track ?? colors.mutedStrong} strokeWidth={stroke} fill="none" />
-        {pct > 0 ? (
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            stroke={color}
-            strokeWidth={stroke}
-            fill="none"
-            strokeLinecap="round"
-            strokeDasharray={`${circ} ${circ}`}
-            strokeDashoffset={circ * (1 - pct)}
-          />
-        ) : null}
+        <AnimatedCircle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={color}
+          strokeWidth={stroke}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${circ} ${circ}`}
+          animatedProps={arc}
+        />
       </Svg>
       {children}
     </View>
@@ -482,28 +560,33 @@ export function Kpi({
   );
   const base = [styles.kpi, { backgroundColor: colors.surface, borderColor: colors.line }, style];
   return onPress ? (
-    <Pressable onPress={onPress} style={({ pressed }) => [...base, pressed && { backgroundColor: colors.subtle }]}>
+    <PressableScale scaleTo={0.97} onPress={onPress} style={({ pressed }) => [...base, pressed && { backgroundColor: colors.subtle }]}>
       {body}
-    </Pressable>
+    </PressableScale>
   ) : (
     <View style={base}>{body}</View>
   );
 }
 
-export function KpiGrid({ children }: { children: React.ReactNode }) {
+/** KPI tiles in a grid: 2 per row on phones, more as the screen widens (up to `max`). */
+export function KpiGrid({ children, minTileWidth = 150, max = 4 }: { children: React.ReactNode; minTileWidth?: number; max?: number }) {
+  const { columns } = useResponsive();
   const items = React.Children.toArray(children);
-  const rows: React.ReactNode[][] = [];
-  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
+  // Never fewer than 2 on phones (tiles are designed for it), and no wider than there are tiles
+  const cols = Math.max(Math.min(2, items.length), Math.min(items.length, columns(minTileWidth, space.sm, max)));
+  const rows = chunk(items, cols);
   return (
     <View style={{ gap: space.sm }}>
       {rows.map((r, i) => (
         <View key={i} style={{ flexDirection: 'row', gap: space.sm }}>
           {r.map((item, j) => (
-            <View key={j} style={{ flex: 1 }}>
+            <View key={j} style={{ flex: 1, minWidth: 0 }}>
               {item}
             </View>
           ))}
-          {r.length === 1 ? <View style={{ flex: 1 }} /> : null}
+          {Array.from({ length: cols - r.length }).map((_, j) => (
+            <View key={`pad-${j}`} style={{ flex: 1 }} />
+          ))}
         </View>
       ))}
     </View>
@@ -521,14 +604,15 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    right: space.lg,
-    bottom: space.lg,
-    width: 56,
-    height: 56,
     borderRadius: radius.xl,
+    ...elevation.float,
+  },
+  fabInner: {
+    flex: 1,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    ...elevation.float,
   },
   chip: {
     flexDirection: 'row',

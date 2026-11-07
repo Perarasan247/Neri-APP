@@ -8,6 +8,7 @@ import { CellSheet, type CellSelection } from '@/components/habits/CellSheet';
 import { HabitMonthStrip, MonthLegend, MonthRuler, MonthSummary } from '@/components/habits/MonthGrid';
 import { HabitWeekCard, WeekHeader, WeekLegend, cellEditable } from '@/components/habits/WeekView';
 import {
+  Appear,
   ActionSheet,
   Button,
   Card,
@@ -28,6 +29,7 @@ import { addDays, monthLabel, parseISODate, startOfWeek, today } from '@/lib/for
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
 import { space } from '@/theme/tokens';
+import { useResponsive } from '@/theme/useResponsive';
 
 type Mode = 'week' | 'month';
 type YM = { y: number; m: number };
@@ -71,6 +73,8 @@ function mergeRows(a?: MonthlyData, b?: MonthlyData): MonthlyHabitRow[] {
  */
 export default function HabitsScreen() {
   const { colors } = useTheme();
+  const { gutter } = useResponsive();
+  const listStyle = [styles.list, { paddingHorizontal: gutter }];
   const toast = useToast();
   const menu = useDisclosure();
   const upsert = useUpsertLog();
@@ -261,7 +265,7 @@ export default function HabitsScreen() {
         <FlatList
           data={status ? [] : rows}
           keyExtractor={(r) => r.habit.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={listStyle}
           refreshControl={refreshControl}
           ListHeaderComponent={
             <>
@@ -276,7 +280,8 @@ export default function HabitsScreen() {
           }
           ListEmptyComponent={empty ? emptyState : undefined}
           ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
+            <Appear index={index} animateIn={index < 8} layout={false}>
             <HabitWeekCard
               row={item}
               days={days}
@@ -285,6 +290,7 @@ export default function HabitsScreen() {
               onDayPress={onDayPress}
               onDayLongPress={openEditor}
             />
+            </Appear>
           )}
           ListFooterComponent={
             rows.length > 0 && !status ? (
@@ -298,7 +304,7 @@ export default function HabitsScreen() {
           }
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.list} refreshControl={refreshControl}>
+        <ScrollView contentContainerStyle={listStyle} refreshControl={refreshControl}>
           {header}
           {status}
           {empty ? emptyState : null}
@@ -344,7 +350,7 @@ export default function HabitsScreen() {
 }
 
 const styles = StyleSheet.create({
-  list: { paddingHorizontal: space.lg, paddingBottom: space.xxxl, flexGrow: 1 },
+  list: { paddingBottom: space.xxxl, flexGrow: 1 },
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   navLabel: { flex: 1, alignItems: 'center' },
   weekHeader: { marginBottom: space.xs },

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { CloudOff } from 'lucide-react-native';
+import Reanimated from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
 import { elevation, radius, space } from '@/theme/tokens';
 import { Button } from './controls';
+import { enterAt } from './motion';
 import { Text } from './Text';
 
 export function EmptyState({
@@ -23,7 +25,7 @@ export function EmptyState({
 }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.empty, style]}>
+    <Reanimated.View entering={enterAt(0)} style={[styles.empty, style]}>
       {icon ? (
         <View style={[styles.emptyIcon, { backgroundColor: colors.surface, borderColor: colors.line, shadowColor: colors.shadow }]}>
           {icon}
@@ -38,7 +40,7 @@ export function EmptyState({
         </Text>
       ) : null}
       {action ? <View style={{ marginTop: space.md }}>{action}</View> : null}
-    </View>
+    </Reanimated.View>
   );
 }
 

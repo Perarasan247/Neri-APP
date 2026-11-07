@@ -11,12 +11,15 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, { SlideInDown } from 'react-native-reanimated';
 import { Check } from 'lucide-react-native';
 
 import { haptic } from '@/lib/haptics';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
+import { useResponsive } from '@/theme/useResponsive';
 import { KeyboardAvoider, useKeyboardVisible } from './keyboard';
+import { PressableScale } from './motion';
 import { Text } from './Text';
 
 /* ---------- Bottom sheet ---------- */
@@ -52,6 +55,7 @@ export function Sheet({
   const { colors, reduceMotion } = useTheme();
   const insets = useSafeAreaInsets();
   const keyboardUp = useKeyboardVisible();
+  const { isTablet } = useResponsive();
 
   // iOS reports dismissal natively; Android has no onDismiss, so wait out the slide animation
   const wasVisible = useRef(visible);
@@ -64,11 +68,15 @@ export function Sheet({
     wasVisible.current = visible;
   }, [visible, onDismissed]);
 
+  // The backdrop fades (Modal) while the sheet itself springs up from the bottom edge
   const body = (
-    <View
+    <Reanimated.View
+      entering={SlideInDown.springify().damping(22).stiffness(260).mass(0.8)}
       style={[
         styles.sheet,
         { backgroundColor: colors.surface, paddingBottom: keyboardUp ? space.md : Math.max(insets.bottom, space.lg) },
+        // Tablets: a centred sheet of readable width instead of a full-width slab
+        isTablet && styles.sheetWide,
         contentStyle,
       ]}
     >
@@ -90,13 +98,13 @@ export function Sheet({
       ) : (
         children
       )}
-    </View>
+    </Reanimated.View>
   );
   return (
     <Modal
       visible={visible}
       transparent
-      animationType={reduceMotion ? 'none' : 'slide'}
+      animationType={reduceMotion ? 'none' : 'fade'}
       onRequestClose={onClose}
       onDismiss={Platform.OS === 'ios' ? onDismissed : undefined}
       statusBarTranslucent
@@ -148,7 +156,8 @@ export function ActionSheet({
       }}
     >
       {options.map((o, i) => (
-        <Pressable
+        <PressableScale
+          scaleTo={0.98}
           key={`${o.label}-${i}`}
           accessibilityRole="menuitem"
           onPress={() => {
@@ -168,7 +177,7 @@ export function ActionSheet({
             </Text>
           ) : null}
           {o.selected ? <Check size={18} color={colors.accent} /> : null}
-        </Pressable>
+        </PressableScale>
       ))}
     </Sheet>
   );
@@ -268,6 +277,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.xxl,
     paddingTop: space.sm,
     maxHeight: '90%',
+  },
+  sheetWide: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
   },
   grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, marginBottom: space.md },
   option: {

@@ -12,8 +12,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronDown } from 'lucide-react-native';
 
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+
 import { useStyles, useTheme } from '@/theme/ThemeProvider';
 import { radius, space } from '@/theme/tokens';
+import { useResponsive } from '@/theme/useResponsive';
+import { DURATION, EASE } from './motion';
 import { KeyboardAvoider, KeyboardScrollView } from './keyboard';
 import { Text } from './Text';
 
@@ -57,19 +61,25 @@ export function Screen({
 }: ScreenProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { gutter, contentMaxWidth } = useResponsive();
 
   const header = title ? <LargeTitle title={title} subtitle={subtitle} actions={actions} /> : null;
+  // Size-class gutter (plus the side insets in landscape); on tablets a centred, capped column
   const padding: ViewStyle = {
     paddingTop: safeTop ? insets.top + space.sm : space.md,
-    paddingHorizontal: padded ? space.lg : 0,
+    paddingLeft: padded ? gutter + insets.left : insets.left,
+    paddingRight: padded ? gutter + insets.right : insets.right,
     paddingBottom: fabSpace ? 96 : space.xxl,
   };
+  const column: ViewStyle = { width: '100%', maxWidth: contentMaxWidth, alignSelf: 'center' };
 
   if (!scroll) {
     return (
-      <KeyboardAvoider style={[{ backgroundColor: colors.canvas }, padding, { paddingBottom: 0 }]}>
-        {header}
-        {children}
+      <KeyboardAvoider style={{ backgroundColor: colors.canvas }}>
+        <View style={[{ flex: 1 }, column, padding, { paddingBottom: 0 }]}>
+          {header}
+          {children}
+        </View>
       </KeyboardAvoider>
     );
   }
@@ -78,7 +88,7 @@ export function Screen({
     <KeyboardAvoider style={{ backgroundColor: colors.canvas }}>
     <KeyboardScrollView
       style={{ flex: 1, backgroundColor: colors.canvas }}
-      contentContainerStyle={[padding, contentContainerStyle]}
+      contentContainerStyle={[column, padding, contentContainerStyle]}
       refreshControl={
         onRefresh ? (
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.fgSubtle} colors={[colors.accent]} />
@@ -102,10 +112,13 @@ export function LargeTitle({
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
+  const { isCompact, isTablet } = useResponsive();
+  // Small phones get a slightly smaller title so long ones ("Habit insights") still fit; tablets a touch larger
+  const titleSize = isCompact ? { fontSize: 27, lineHeight: 33 } : isTablet ? { fontSize: 36, lineHeight: 42 } : undefined;
   return (
-    <View style={styles.titleRow}>
+    <View style={[styles.titleRow, isCompact && { marginBottom: space.lg }]}>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text variant="display" numberOfLines={1}>
+        <Text variant="display" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={titleSize}>
           {title}
         </Text>
         {subtitle ? (
@@ -170,13 +183,7 @@ export function SectionHeader({ title, count, tone = 'fg', action, collapsed, on
             </Text>
           </Pressable>
         ) : null}
-        {onToggle ? (
-          <ChevronDown
-            size={18}
-            color={colors.fgMuted}
-            style={{ transform: [{ rotate: collapsed ? '-90deg' : '0deg' }] }}
-          />
-        ) : null}
+        {onToggle ? <Chevron collapsed={!!collapsed} color={colors.fgMuted} /> : null}
       </View>
     </View>
   );
@@ -186,6 +193,20 @@ export function SectionHeader({ title, count, tone = 'fg', action, collapsed, on
     </Pressable>
   ) : (
     content
+  );
+}
+
+/** Disclosure chevron that rotates smoothly between open and collapsed. */
+function Chevron({ collapsed, color }: { collapsed: boolean; color: string }) {
+  const turn = useSharedValue(collapsed ? 1 : 0);
+  React.useEffect(() => {
+    turn.set(withTiming(collapsed ? 1 : 0, { duration: DURATION.base, easing: EASE }));
+  }, [collapsed, turn]);
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${-90 * turn.value}deg` }] }));
+  return (
+    <Animated.View style={style}>
+      <ChevronDown size={18} color={color} />
+    </Animated.View>
   );
 }
 

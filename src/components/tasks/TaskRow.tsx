@@ -1,10 +1,10 @@
 import React, { memo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Calendar, Clock, ListChecks, MapPin, Repeat, Target } from 'lucide-react-native';
 
 import type { Todo } from '@/api/types';
-import { Checkbox, Text, useToast } from '@/components/ui';
+import { Checkbox, PressableScale, Text, useToast } from '@/components/ui';
 import { useGoalLookup, useToggleTodo } from '@/hooks/queries';
 import { diffDays, friendlyDate, priorityColor, taskTimeLabel, today } from '@/lib/format';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -50,7 +50,8 @@ export const TaskRow = memo(function TaskRow({ todo, hideDate, hideCategory, var
     });
 
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.985}
       onPress={() => router.push({ pathname: '/task/[id]', params: { id: todo.id } })}
       accessibilityRole="button"
       accessibilityLabel={`${todo.title}${done ? ', completed' : ''}`}
@@ -127,13 +128,13 @@ export const TaskRow = memo(function TaskRow({ todo, hideDate, hideCategory, var
           ) : null}
           <View style={{ flex: 1 }} />
           {!hideCategory && todo.category ? (
-            <Text variant="caption" tone="subtle" numberOfLines={1}>
+            <Text variant="caption" tone="subtle" numberOfLines={1} style={{ flexShrink: 1, maxWidth: '45%' }}>
               #{todo.category}
             </Text>
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 });
 
