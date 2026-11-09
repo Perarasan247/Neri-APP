@@ -262,6 +262,9 @@ function Empty({ title, subtitle, t, uri }: { title: string; subtitle?: string; 
   );
 }
 
+/** Stable sort key: unfinished items first, finished ones sink to the bottom. */
+const unfinishedFirst = (a: { done: boolean }, b: { done: boolean }) => Number(a.done) - Number(b.done);
+
 function SectionHeader({ label, color, t }: { label: string; color?: Hex; t: WidgetTheme }) {
   return (
     <FlexWidget style={{ width: 'match_parent', paddingTop: 8, paddingBottom: 2, paddingHorizontal: 4 }}>
@@ -408,7 +411,7 @@ function HabitsPage({ s, t, layout, addUri, quick, now }: { s: WidgetSnapshot; t
       {progress}
       <ListWidget style={{ width: 'match_parent', height: 'match_parent' }}>
         {capped(
-          s.habits.map((h) => <HabitRow key={h.id} h={h} t={t} quick={quick} now={now} wide={layout.wide} />),
+          [...s.habits].sort(unfinishedFirst).map((h) => <HabitRow key={h.id} h={h} t={t} quick={quick} now={now} wide={layout.wide} />),
           t,
           'neri://',
           layout.limit,
@@ -505,7 +508,7 @@ function TasksPage({
 }) {
   const ctx: RowCtx = { t, now, quick };
   const overdue = s.today.filter((x) => x.date !== null && x.date < now);
-  const planned = s.today.filter((x) => x.date === null || x.date >= now);
+  const planned = s.today.filter((x) => x.date === null || x.date >= now).sort(unfinishedFirst);
   const todayOpen = s.today.filter((x) => !x.done).length;
   const inboxOpen = s.inbox.filter((x) => !x.done).length;
 
